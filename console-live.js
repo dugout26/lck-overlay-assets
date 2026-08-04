@@ -3185,8 +3185,7 @@
      리플레이 폴백이 무관한 페이지에 뜨는 것 방지 */
   var SOOP_PAGE = /(^|\.)(sooplive\.(co\.kr|com)|afreecatv\.com)$/.test(location.hostname);
   if (!AUTO && !SOOP_PAGE) {
-    if (!window.confirm("SOOP 페이지가 아닙니다.
-테스트용으로 여기에 오버레이를 띄울까요?")) {
+    if (!window.confirm("SOOP 페이지가 아닙니다. 테스트용으로 여기에 오버레이를 띄울까요?")) {
       window.__lckovConsole = false;
       return;
     }
