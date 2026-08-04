@@ -257,6 +257,18 @@
     'input[type=range] { flex: 1; appearance: none; -webkit-appearance: none; height: 3px; border-radius: 2px; background: rgba(255,255,255,0.16); outline: none; cursor: pointer; }',
     'input[type=range]::-webkit-slider-thumb { appearance: none; -webkit-appearance: none; width: 13px; height: 13px; border-radius: 50%; background: var(--gold); border: 2px solid #0E1117; }',
     '.note { margin-top: 7px; font-size: 9.5px; color: #566070; line-height: 1.5; }',
+    '.srcsel, .clockin {',
+    '  background: #05070B; color: var(--tx); border: 1px solid var(--line); border-radius: 7px;',
+    '  padding: 6px 8px; font-size: 11px; font-family: inherit;',
+    '}',
+    '.srcsel { flex: 1; }',
+    '.clockin { width: 74px; }',
+    '.minibtn {',
+    '  padding: 6px 12px; border-radius: 7px; background: rgba(232,195,107,0.12);',
+    '  border: 1px solid rgba(232,195,107,0.45); color: var(--gold); font-size: 11px; font-weight: 700;',
+    '  cursor: pointer; font-family: inherit;',
+    '}',
+    '.minibtn:hover { background: rgba(232,195,107,0.2); }',
 
     /* ── 방해금지 모드: 패널 숨기고 방송 HUD 위치에 투명 클릭 존 ── */
     '.root.dnd .panel, .root.dnd .pillwrap { display: none; }',
@@ -923,6 +935,64 @@
       function (v) { return v + '%'; },
       function (v) { root.style.setProperty('--bg-a', v / 100); store.set('alpha', v); });
 
+    /* 데이터 소스 선택 (라이브 클라이언트 연동 시): 경기·세트 선택 + 게임 시간 싱크 */
+    if (opts.source) {
+      var src = opts.source;
+      var mCtl = el('div', 'ctl');
+      mCtl.appendChild(el('label', null, '경기 선택'));
+      var selEl = document.createElement('select');
+      selEl.className = 'srcsel';
+      var optAuto = document.createElement('option');
+      optAuto.value = '';
+      optAuto.textContent = '자동 (라이브 → 방송 제목 인식)';
+      selEl.appendChild(optAuto);
+      (src.matches || []).forEach(function (m) {
+        var o = document.createElement('option');
+        o.value = m.id;
+        o.textContent = m.label;
+        selEl.appendChild(o);
+      });
+      if (src.currentMatchId) selEl.value = String(src.currentMatchId);
+      selEl.addEventListener('change', function () { src.onSelectMatch(selEl.value || null); });
+      mCtl.appendChild(selEl);
+      drawer.appendChild(mCtl);
+
+      if (src.setCount > 1) {
+        var setCtl = el('div', 'ctl');
+        setCtl.appendChild(el('label', null, '세트'));
+        var setRow = el('div', 'tglrow');
+        for (var si = 1; si <= src.setCount; si++) {
+          (function (num) {
+            var b = el('button', 'tgl' + (num === src.setNumber ? ' on' : ''), num + '세트');
+            b.type = 'button';
+            b.addEventListener('click', function () { src.onSelectSet(num); });
+            setRow.appendChild(b);
+          })(si);
+        }
+        setCtl.appendChild(setRow);
+        drawer.appendChild(setCtl);
+      }
+
+      if (src.canSync) {
+        var syncCtl = el('div', 'ctl');
+        syncCtl.appendChild(el('label', null, '게임 시간'));
+        var clockIn = document.createElement('input');
+        clockIn.className = 'clockin';
+        clockIn.placeholder = '예: 15:45';
+        var goBtn = el('button', 'minibtn', '이동');
+        goBtn.type = 'button';
+        goBtn.addEventListener('click', function () {
+          var mm = /^(\d{1,2}):(\d{2})$/.exec(clockIn.value.trim());
+          if (!mm) { clockIn.value = ''; clockIn.placeholder = 'mm:ss 형식'; return; }
+          src.onSyncClock(Number(mm[1]) * 60 + Number(mm[2]));
+        });
+        syncCtl.appendChild(clockIn);
+        syncCtl.appendChild(goBtn);
+        syncCtl.appendChild(el('span', 'note', '화면 속 게임 시계를 입력하면 그 시점으로'));
+        drawer.appendChild(syncCtl);
+      }
+    }
+
     /* 모드 프리셋: 개인 시청(기본) / 스트리머 송출(크게 + 불투명 — 재인코딩 대비) */
     var MODES = [
       ['personal', '개인 시청', { scale: 100, alpha: 94 }],
@@ -1310,18 +1380,38 @@
     } catch (e) { return 0; }
   }
 
-  async function findReplayGame() {
+  /* 최근 12일 종료 경기 목록 (스포일러 방지: 스코어 미포함) */
+  async function listRecent() {
+    var out = [];
     for (var i = 0; i < LEAGUE_IDS.length; i++) {
-      var sch = await api("getSchedule?hl=ko-KR&leagueId=" + LEAGUE_IDS[i]);
-      var done = sch.data.schedule.events.filter(function (e) { return e.state === "completed" && e.type === "match"; });
-      if (!done.length) continue;
-      var last = done[done.length - 1];
-      var det = await api("getEventDetails?hl=ko-KR&id=" + last.match.id);
-      var g = det.data.event.match.games.filter(function (x) { return x.state === "completed"; })[0];
-      if (g) return { gameId: g.id, gameNumber: g.number, live: false,
-                      title: last.match.teams.map(function (t) { return t.name; }).join(" vs ") };
+      try {
+        var sch = await api("getSchedule?hl=ko-KR&leagueId=" + LEAGUE_IDS[i]);
+        var isCL = LEAGUE_IDS[i] === "98767991335774713";
+        sch.data.schedule.events.forEach(function (e) {
+          if (e.type !== "match" || e.state !== "completed") return;
+          var when = new Date(e.startTime);
+          if (Date.now() - when.getTime() > 12 * 86400000) return;
+          var codes = e.match.teams.map(function (t) { return t.code || t.name; });
+          out.push({ matchId: e.match.id, codes: codes, time: when.getTime(),
+                     label: (when.getMonth() + 1) + "/" + when.getDate() + " · " + codes.join(" vs ") + (isCL ? " (CL)" : " (LCK)") });
+        });
+      } catch (err) {}
     }
-    return null;
+    out.sort(function (a, b) { return b.time - a.time; });
+    return out;
+  }
+
+  /* 방송 제목에서 팀 코드 2개가 모두 발견되는 경기 자동 인식 (워치파티 대응) */
+  function matchFromTitle(list) {
+    var title = (document.title || "").toUpperCase();
+    var hits = list.filter(function (m) {
+      return m.codes.every(function (c) {
+        var code = String(c).toUpperCase().replace(/[^A-Z0-9]/g, "");
+        if (!code || code === "TBD") return false;
+        return new RegExp("(^|[^A-Z0-9])" + code + "([^A-Z0-9]|$)").test(title);
+      });
+    });
+    return hits[0] || null;
   }
 
   var ddCache = null;
@@ -1509,37 +1599,61 @@
         lastRefresh = Date.now();
         await liveTick();
         timer = setInterval(function () { liveTick().catch(function (e) { log("폴링 오류: " + e.message); }); }, 10000);
-        return { stop: function () { clearInterval(timer); }, game: live };
+        return { stop: function () { clearInterval(timer); }, live: true, matchId: live.matchId, title: live.title };
       }
-      log("라이브 경기 없음 → 최근 종료 경기를 리플레이 모드로 재생");
+      log("라이브 경기 없음");
     }
 
-    /* ── 수동 지정 · 리플레이: 단일 게임 경로 ── */
-    var game;
-    if (opts.gameId) {
-      game = { gameId: String(opts.gameId), gameNumber: opts.gameNumber || 1, title: "수동 지정" };
-    } else {
-      game = await findReplayGame();
+    /* ── 리플레이: 매치·세트 지정 (수동 선택 / 제목 인식 / 최근 경기 폴백) ── */
+    if (opts.matchId) return startReplayMatch(opts.matchId, opts.setNumber, opts, "선택한 경기");
+    var list = await listRecent();
+    var hit = matchFromTitle(list);
+    if (hit) {
+      log("방송 제목에서 경기 인식: " + hit.label);
+      return startReplayMatch(hit.matchId, 1, opts, "제목 인식");
     }
-    if (!game) { log("경기를 찾지 못했습니다"); return null; }
-    log("리플레이: " + game.title + " " + game.gameNumber + "세트 (gameId " + game.gameId + ")");
-
-    var w0 = await jOr(FEED + "/window/" + game.gameId);
-    if (!w0) { log("livestats 피드가 없습니다"); return null; }
-    var gameStart = new Date(w0.frames[0].rfc460Timestamp);
-    var replayClock = new Date(gameStart.getTime() + 15 * 60000);
-    var goldHistory = [];
-
-    async function replayTick() {
-      replayClock = new Date(replayClock.getTime() + 10000);
-      await fetchAndEmit(game.gameId, game.gameNumber, gameStart, replayClock, goldHistory, opts);
+    if (list.length) {
+      log("제목 인식 실패 → 최근 경기 재생 (오버레이 톱니 → 경기 선택에서 변경 가능)");
+      return startReplayMatch(list[0].matchId, 1, opts, "최근 경기");
     }
-    await replayTick();
-    timer = setInterval(function () { replayTick().catch(function (e) { log("폴링 오류: " + e.message); }); }, 10000);
-    return { stop: function () { clearInterval(timer); }, game: game };
+    log("경기를 찾지 못했습니다");
+    return null;
   }
 
-  window.LCKLive = { start: start };
+  /* 특정 매치의 특정 세트를 리플레이 (게임 시간 점프 지원) */
+  async function startReplayMatch(matchId, setNumber, opts, labelPrefix) {
+    var det = await api("getEventDetails?hl=ko-KR&id=" + matchId);
+    var m = det.data.event.match;
+    var title = m.teams.map(function (t) { return t.code || t.name; }).join(" vs ");
+    var games = m.games.filter(function (g) { return g.state === "completed"; });
+    if (!games.length) { log("이 매치의 피드가 아직 없습니다"); return null; }
+    var n = Math.min(Math.max(setNumber || 1, 1), games.length);
+    var g = games[n - 1];
+    var w0 = await jOr(FEED + "/window/" + g.id);
+    if (!w0) { log("livestats 피드가 없습니다"); return null; }
+    var gameStart = new Date(w0.frames[0].rfc460Timestamp);
+    var replayClock = new Date(gameStart.getTime() + 60000);
+    var goldHistory = [];
+    log(labelPrefix + ": " + title + " " + n + "세트 — 화면과 시간을 맞추려면 톱니 → 게임 시간에 입력");
+
+    async function tick() {
+      replayClock = new Date(replayClock.getTime() + 10000);
+      await fetchAndEmit(g.id, g.number, gameStart, replayClock, goldHistory, opts);
+    }
+    await tick();
+    var timer = setInterval(function () { tick().catch(function (e) { log("폴링 오류: " + e.message); }); }, 10000);
+    return {
+      stop: function () { clearInterval(timer); },
+      live: false, matchId: matchId, title: title, setNumber: n, setCount: games.length,
+      setClock: function (sec) {
+        replayClock = new Date(gameStart.getTime() + sec * 1000);
+        goldHistory.length = 0; // 점프 시 그래프 재수집 (연속성 없음)
+        tick().catch(function (e) { log("이동 실패: " + e.message); });
+      }
+    };
+  }
+
+  window.LCKLive = { start: start, listRecent: listRecent };
 })();
 
 
@@ -1555,6 +1669,11 @@
   document.documentElement.appendChild(host);
 
   var api = null;
+  var handle = null;
+  var matches = [];
+  var sel = null;
+  try { sel = JSON.parse(sessionStorage.getItem("lckov.sel") || "null"); } catch (e) {}
+  function saveSel() { try { sessionStorage.setItem("lckov.sel", JSON.stringify(sel)); } catch (e) {} }
   var TABS = ["players", "runes", "stats", "gold"];
   function capture() {
     if (!api) return null;
@@ -1585,17 +1704,48 @@
     }
   }
 
-  LCKLive.start({
-    onState: function (state) {
-      var s = capture();
-      if (api) api.destroy();
-      api = LCKOverlay.mount(host, state, {});
-      restore(s);
-    }
-  }).then(function (h) {
-    if (h) {
-      window.__lckovStop = h.stop;
-      console.log("[LCK 오버레이] 실행 중 — 중지하려면 window.__lckovStop()");
-    }
-  });
+  /* 경기·세트 선택과 게임 시간 싱크를 오버레이 설정에 연결 */
+  function makeSource() {
+    return {
+      matches: matches.map(function (m) { return { id: m.matchId, label: m.label }; }),
+      currentMatchId: (handle && !handle.live && handle.matchId) || (sel && sel.matchId) || "",
+      setCount: (handle && handle.setCount) || 1,
+      setNumber: (handle && handle.setNumber) || 1,
+      canSync: !!(handle && handle.setClock),
+      onSelectMatch: function (id) {
+        sel = id ? { matchId: id, setNumber: 1 } : null;
+        saveSel();
+        restart();
+      },
+      onSelectSet: function (n) {
+        sel = { matchId: (sel && sel.matchId) || (handle && handle.matchId), setNumber: n };
+        saveSel();
+        restart();
+      },
+      onSyncClock: function (sec) { if (handle && handle.setClock) handle.setClock(sec); }
+    };
+  }
+  function onState(state) {
+    var s = capture();
+    if (api) api.destroy();
+    api = LCKOverlay.mount(host, state, { source: makeSource() });
+    restore(s);
+  }
+  function boot() {
+    LCKLive.start({ matchId: sel && sel.matchId, setNumber: sel && sel.setNumber, onState: onState })
+      .then(function (h) {
+        if (h) {
+          handle = h;
+          window.__lckovStop = h.stop;
+          console.log("[LCK 오버레이] 실행 중 — 중지하려면 window.__lckovStop()");
+        }
+      });
+  }
+  function restart() {
+    if (handle) handle.stop();
+    handle = null;
+    boot();
+  }
+  LCKLive.listRecent().then(function (m) { matches = m; }).catch(function () {});
+  boot();
 })();
