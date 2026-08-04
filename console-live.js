@@ -1108,6 +1108,39 @@
     var dndzones = el('div', 'dndzones');
     var dndPop = el('div', 'dnd-pop');
     dndPop.style.display = 'none';
+
+    /* 존을 페이지의 video 사각형에 앵커링 — 플레이어가 화면 일부여도 중계 위에 정렬.
+       (워치파티처럼 영상 안에서 다시 축소된 화면까지는 못 따라감 — 원격 설정으로 보정 예정) */
+    var zoneList = [];
+    function largestVideoRect() {
+      var vids = document.querySelectorAll('video');
+      var best = null, area = 0;
+      for (var i = 0; i < vids.length; i++) {
+        var r = vids[i].getBoundingClientRect();
+        var a = r.width * r.height;
+        if (a > area && r.width > 200) { area = a; best = r; }
+      }
+      return best;
+    }
+    function positionZones() {
+      var r = largestVideoRect();
+      var top0 = r ? r.top : 0;
+      var h = r ? r.height : window.innerHeight;
+      var leftX = r ? r.left : 0;
+      var rightX = r ? Math.max(0, window.innerWidth - r.right) : 0;
+      zoneList.forEach(function (z, idx) {
+        var i = idx % 5;
+        z.style.top = (top0 + h * (DND.top + i * DND.step) / 100) + 'px';
+        z.style.height = (h * DND.height / 100) + 'px';
+        z.style.width = DND.width + 'px';
+        if (z.classList.contains('zleft')) { z.style.left = leftX + 'px'; z.style.right = 'auto'; }
+        else { z.style.right = rightX + 'px'; z.style.left = 'auto'; }
+      });
+    }
+    var zoneTimer = setInterval(function () {
+      if (root.classList.contains('dnd')) positionZones();
+    }, 1000);
+    window.addEventListener('resize', positionZones);
     var dndOpenPid = null;
     var dndCmp = false;
     var dndSelZone = null;
@@ -1122,16 +1155,14 @@
       }
     }
     ['blue', 'red'].forEach(function (side) {
-      state.players.filter(function (p) { return p.team === side; }).forEach(function (p, i) {
+      state.players.filter(function (p) { return p.team === side; }).forEach(function (p) {
         var z = el('div', 'dndzone ' + (side === 'blue' ? 'zleft' : 'zright'));
         z.dataset.pid = p.participantId;
-        z.style.top = (DND.top + i * DND.step) + 'vh';
-        z.style.height = DND.height + 'vh';
-        z.style.width = DND.width + 'px';
-        z.style[side === 'blue' ? 'left' : 'right'] = '0';
         var tag = el('span', 'tag', p.name + ' · ' + p.championKr);
         z.appendChild(tag);
-        z.addEventListener('click', function () {
+        z.addEventListener('click', function (ev) {
+          ev.preventDefault();
+          ev.stopPropagation(); // SOOP 플레이어의 클릭(일시정지 등)으로 전파 방지
           if (dndSelZone) dndSelZone.classList.remove('sel');
           if (dndOpenPid === p.participantId) {
             dndOpenPid = null; dndSelZone = null;
@@ -1143,14 +1174,21 @@
           renderDndDetail();
           var rect = z.getBoundingClientRect();
           dndPop.style.top = Math.max(8, Math.min(rect.top, window.innerHeight - 260)) + 'px';
-          dndPop.style.left = side === 'blue' ? (DND.width + 12) + 'px' : 'auto';
-          dndPop.style.right = side === 'red' ? (DND.width + 12) + 'px' : 'auto';
+          if (side === 'blue') {
+            dndPop.style.left = (rect.right + 12) + 'px';
+            dndPop.style.right = 'auto';
+          } else {
+            dndPop.style.right = (window.innerWidth - rect.left + 12) + 'px';
+            dndPop.style.left = 'auto';
+          }
           dndPop.style.transformOrigin = side === 'blue' ? 'top left' : 'top right';
           dndPop.style.display = 'block';
         });
+        zoneList.push(z);
         dndzones.appendChild(z);
       });
     });
+    positionZones();
     dndzones.appendChild(dndPop);
     root.appendChild(dndzones);
     var dndHandle = el('button', 'dnd-handle');
@@ -1263,7 +1301,8 @@
         setDnd(!root.classList.contains('dnd'));
       }
     }
-    document.addEventListener('keydown', keyHandler);
+    /* 캡처 단계 등록 — SOOP 플레이어가 keydown 전파를 끊어도 먼저 받기 위함 */
+    document.addEventListener('keydown', keyHandler, true);
 
     /* 데모용 시계 */
     var timer = null;
@@ -1282,7 +1321,9 @@
       setPref: function (k, v) { PREFS[k] = v ? 1 : 0; savePrefs(); rerenderHooks.forEach(function (f) { f(); }); },
       destroy: function () {
         if (timer) clearInterval(timer);
-        document.removeEventListener('keydown', keyHandler); // 콘솔 버전은 폴링마다 재마운트 — 리스너 누적 방지
+        document.removeEventListener('keydown', keyHandler, true); // 콘솔 버전은 폴링마다 재마운트 — 리스너 누적 방지
+        if (zoneTimer) clearInterval(zoneTimer);
+        window.removeEventListener('resize', positionZones);
         shadow.textContent = '';
       }
     };
@@ -1374,7 +1415,7 @@
   /* ── 시간축 원칙: 오버레이의 기준 시각은 "시청자가 보고 있는 화면의 시각" ──
      라이브 되감기(타임시프트) 대응: 페이지의 video 요소에서 라이브 엣지 대비
      얼마나 뒤에 있는지(Δ)를 읽는다. video가 없거나 판별 불가면 0 (현재 시각 기준 폴백). */
-  function videoBehindLive() {
+  function findVideo() {
     try {
       var vids = document.querySelectorAll("video");
       var v = null, area = 0;
@@ -1382,6 +1423,13 @@
         var r = vids[i].getBoundingClientRect();
         if (r.width * r.height > area) { area = r.width * r.height; v = vids[i]; }
       }
+      return v;
+    } catch (e) { return null; }
+  }
+
+  function videoBehindLive() {
+    try {
+      var v = findVideo();
       if (!v || !v.seekable || !v.seekable.length) return 0;
       var edge = v.seekable.end(v.seekable.length - 1);
       var behind = edge - v.currentTime;
@@ -1646,8 +1694,19 @@
     var goldHistory = [];
     log(labelPrefix + ": " + title + " " + n + "세트 — 화면과 시간을 맞추려면 톱니 → 게임 시간에 입력");
 
+    /* 영상 앵커: 리플레이 시계를 video 재생 위치에 묶는다.
+       시킹·일시정지가 데이터에 그대로 반영되고, '게임 시간' 입력은 오프셋 보정 1회. */
+    var anchor = null; // { videoT: video.currentTime, gameMs: 그때의 게임 시각 }
+    var v0 = findVideo();
+    if (v0) anchor = { videoT: v0.currentTime, gameMs: replayClock.getTime() };
+
     async function tick() {
-      replayClock = new Date(replayClock.getTime() + 10000);
+      var v = findVideo();
+      if (anchor && v) {
+        replayClock = new Date(anchor.gameMs + (v.currentTime - anchor.videoT) * 1000);
+      } else {
+        replayClock = new Date(replayClock.getTime() + 10000);
+      }
       await fetchAndEmit(g.id, g.number, gameStart, replayClock, goldHistory, opts);
     }
     await tick();
@@ -1657,6 +1716,8 @@
       live: false, matchId: matchId, title: title, setNumber: n, setCount: games.length,
       setClock: function (sec) {
         replayClock = new Date(gameStart.getTime() + sec * 1000);
+        var v = findVideo();
+        anchor = v ? { videoT: v.currentTime, gameMs: replayClock.getTime() } : null;
         goldHistory.length = 0; // 점프 시 그래프 재수집 (연속성 없음)
         tick().catch(function (e) { log("이동 실패: " + e.message); });
       }
