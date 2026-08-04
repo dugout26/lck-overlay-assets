@@ -2233,6 +2233,17 @@
   host.id = "lckov-host";
   document.documentElement.appendChild(host);
 
+  /* 전체화면에서는 풀스크린 요소(top layer)만 렌더되므로 호스트를 그 안으로 옮긴다 */
+  function placeHost() {
+    var fs = document.fullscreenElement || document.webkitFullscreenElement || null;
+    if (fs && fs.tagName === "VIDEO") fs = fs.parentElement; // video 자체에는 자식을 얹을 수 없음
+    var target = fs || document.documentElement;
+    if (target && host.parentNode !== target) target.appendChild(host);
+  }
+  document.addEventListener("fullscreenchange", placeHost);
+  document.addEventListener("webkitfullscreenchange", placeHost);
+  placeHost();
+
   var api = null;
   var handle = null;
   var matches = [];
