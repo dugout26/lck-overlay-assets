@@ -1459,6 +1459,86 @@
     return out;
   }
 
+  /* SOOP 공식 다시보기 페이지면 VOD 번호 추출 */
+  function soopVodId() {
+    try {
+      if (!/(^|\.)vod\./.test(location.hostname) && !/vod\.(sooplive|afreecatv)/.test(location.hostname)) return null;
+      var m = location.pathname.match(/\/player\/(\d+)/);
+      return m ? m[1] : null;
+    } catch (e) { return null; }
+  }
+
+  /* VOD 번호 ↔ 라이엇 vods 매핑: 공식 다시보기면 경기·세트·firstFrameTime까지 확보 (완전 자동 싱크) */
+  async function findOfficialVod(vodId) {
+    var cacheKey = "lckov.vodmap." + vodId;
+    try {
+      var cached = sessionStorage.getItem(cacheKey);
+      if (cached) return cached === "none" ? null : JSON.parse(cached);
+    } catch (e) {}
+    var list = await listRecent();
+    for (var i = 0; i < Math.min(list.length, 15); i++) {
+      try {
+        var det = await api("getEventDetails?hl=ko-KR&id=" + list[i].matchId);
+        var m = det.data.event.match;
+        var games = m.games;
+        for (var gi = 0; gi < games.length; gi++) {
+          var vods = games[gi].vods || [];
+          for (var vi = 0; vi < vods.length; vi++) {
+            var v = vods[vi];
+            if ((v.provider === "afreecatv" || v.provider === "soop") && String(v.parameter) === String(vodId) && v.firstFrameTime) {
+              var info = {
+                matchId: list[i].matchId,
+                gameId: games[gi].id,
+                setNumber: games[gi].number,
+                firstFrameMs: new Date(v.firstFrameTime).getTime(),
+                title: m.teams.map(function (t) { return t.code || t.name; }).join(" vs "),
+              };
+              try { sessionStorage.setItem(cacheKey, JSON.stringify(info)); } catch (e) {}
+              return info;
+            }
+          }
+        }
+      } catch (err) {}
+    }
+    try { sessionStorage.setItem(cacheKey, "none"); } catch (e) {}
+    return null;
+  }
+
+  /* 공식 다시보기: firstFrameTime + 영상 재생 위치 = 절대 시각 — 입력 없이 시킹·밴픽까지 자동 */
+  async function startOfficialVod(info, opts) {
+    var w0 = await jOr(FEED + "/window/" + info.gameId);
+    if (!w0) { log("livestats 피드가 없습니다"); return null; }
+    var gameStart = new Date(w0.frames[0].rfc460Timestamp);
+    var goldHistory = [];
+    var manualOffset = 0; // 미세 보정용 (선택)
+    log("공식 다시보기 자동 싱크: " + info.title + " " + info.setNumber + "세트 — 시킹·밴픽 모두 자동 추적");
+
+    async function tick() {
+      var v = findVideo();
+      if (!v) { log("video 요소를 찾지 못했습니다"); return; }
+      var clock = new Date(info.firstFrameMs + v.currentTime * 1000 + manualOffset);
+      if (clock < gameStart) {
+        if (opts.onPregame) opts.onPregame();
+        return;
+      }
+      await fetchAndEmit(info.gameId, info.setNumber, gameStart, clock, goldHistory, opts);
+    }
+    await tick();
+    var timer = setInterval(function () { tick().catch(function (e) { log("폴링 오류: " + e.message); }); }, 10000);
+    return {
+      stop: function () { clearInterval(timer); },
+      live: false, official: true, matchId: info.matchId, title: info.title,
+      setNumber: info.setNumber, setCount: 1,
+      setClock: function (sec) {
+        var v = findVideo();
+        if (!v) return;
+        manualOffset = (gameStart.getTime() + sec * 1000) - (info.firstFrameMs + v.currentTime * 1000);
+        goldHistory.length = 0;
+        tick().catch(function (e) { log("이동 실패: " + e.message); });
+      }
+    };
+  }
+
   /* 방송 제목에서 팀 코드 2개가 모두 발견되는 경기 자동 인식 (워치파티 대응) */
   function matchFromTitle(list) {
     var title = (document.title || "").toUpperCase();
@@ -1662,8 +1742,15 @@
       log("라이브 경기 없음");
     }
 
-    /* ── 리플레이: 매치·세트 지정 (수동 선택 / 제목 인식 / 최근 경기 폴백) ── */
+    /* ── 리플레이: 매치·세트 지정 (수동 선택 / 공식 VOD 자동 / 제목 인식 / 최근 경기 폴백) ── */
     if (opts.matchId) return startReplayMatch(opts.matchId, opts.setNumber, opts, "선택한 경기");
+    var vodId = soopVodId();
+    if (vodId) {
+      log("공식 다시보기 확인 중 (VOD " + vodId + ")...");
+      var vodInfo = await findOfficialVod(vodId);
+      if (vodInfo) return startOfficialVod(vodInfo, opts);
+      log("공식 다시보기 아님 (워치파티 녹화 등) → 제목 인식 시도");
+    }
     var list = await listRecent();
     var hit = matchFromTitle(list);
     if (hit) {
