@@ -1353,7 +1353,7 @@
 (function () {
   "use strict";
 
-  var SCAN_W = 800;        // 탐색 단계 축소 폭 (작은 시계 획 보존)
+  var SCAN_W = 1120;       // 탐색 단계 폭 — 실방송의 작은 시계 글자(수 px) 보존
   var GLYPH_W = 10, GLYPH_H = 14; // 정규화 글리프 크기
   var DIFF_T = 18;         // 픽셀 변화 판정 임계 (0-255 luma)
 
@@ -1457,13 +1457,17 @@
           clearInterval(timer);
           var mask = new Uint8Array(count.length);
           for (var j = 0; j < count.length; j++) {
-            mask[j] = (count[j] >= 3 && count[j] <= 9) ? 1 : 0; // ≈1Hz만
+            mask[j] = (count[j] >= 3 && count[j] <= 15) ? 1 : 0; // ≈1Hz (압축 번짐으로 2배 카운트 허용)
           }
+          /* 숫자 글자 크기 + 공간 사전 조건: e스포츠 스코어바 시계는 항상 상단 중앙.
+             게임 화면 속 쿨다운·부활 타이머(똑같이 1Hz)를 배제하는 결정적 필터 */
           var boxes = components(mask, w, h).filter(function (b) {
-            return b.w >= 2 && b.w <= 30 && b.h >= 3 && b.h <= 36 && b.n >= 4;
+            return b.w >= 2 && b.w <= 20 && b.h >= 4 && b.h <= 24 && b.n >= 4 && b.n <= 120 &&
+                   b.y + b.h <= h * 0.18 && b.x >= w * 0.25 && b.x + b.w <= w * 0.75;
           });
-          boxes.sort(function (a, b) { return b.n - a.n; });
-          done(boxes.slice(0, 12), w, h);
+          /* 전형적 숫자 획 픽셀 수(~25)에 가까운 순 — 크기순이면 노이즈가 시계를 밀어냄 */
+          boxes.sort(function (a, b) { return Math.abs(a.n - 25) - Math.abs(b.n - 25); });
+          done(boxes.slice(0, 16), w, h);
         }
       }, 250);
     }
@@ -1488,8 +1492,12 @@
                 n++;
               }
             }
-            /* 픽셀별 절대차 평균 — 잉크량이 비슷한 숫자 전환(7→1 등)도 획 위치가 다르면 잡힘 */
-            if (diff / n > 6) times[i].push(now);
+            /* 픽셀별 절대차 평균 — 잉크량이 비슷한 숫자 전환(7→1 등)도 획 위치가 다르면 잡힘.
+               0.45초 내 재감지는 같은 전환의 압축 번짐으로 보고 병합 */
+            if (diff / n > 6) {
+              var last = times[i][times[i].length - 1];
+              if (last == null || now - last > 0.45) times[i].push(now);
+            }
           }
         }
         prevFrame = cur;
@@ -1583,13 +1591,16 @@
     /* ── C. 자가학습: 초 일의 자리 0..9 순환 수집, 십의 자리 변화 = 9→0 ── */
     function calibrate(cells, done) {
       var glyphs = [];   // { bits, tensChanged }
-      var lastU = null, lastT = null;
+      var lastU = null, lastT = null, settle = 0;
       var timer = setInterval(function () {
         if (stopped) return clearInterval(timer);
         var gU = glyphOf(ctx, video, cells.secU);
         var gT = glyphOf(ctx, video, cells.secT);
         if (gU.contrast < 50) return;
-        if (lastU && similarity(gU.bits, lastU.bits) > 0.93) { lastT = gT; return; } // 변화 없음
+        if (lastU && similarity(gU.bits, lastU.bits) > 0.93) { lastT = gT; settle = 0; return; } // 변화 없음
+        /* 압축 번짐 대비: 전환 감지 후 한 샘플 더 기다려 안정된 글리프를 수집 */
+        if (settle < 1) { settle++; return; }
+        settle = 0;
         var tensChanged = lastT ? similarity(gT.bits, lastT.bits) < 0.9 : false;
         glyphs.push({ bits: gU.bits, tensChanged: tensChanged });
         lastU = gU; lastT = gT;
@@ -2155,11 +2166,22 @@
     /* 게임 시계 OCR: 화면 속 mm:ss를 계속 읽어 자가 재동기화 —
        리워치 파티에서 스트리머가 영상을 멈추거나 돌려도 자동으로 따라간다 */
     var ocr = null;
+    var ocrPrev = null; // { time, videoT } — 읽기 일관성 검사용
     if (typeof LCKClockOCR !== "undefined" && v0) {
       ocr = LCKClockOCR.start(v0, function (ev) {
         if (ev.state !== "reading") return;
         var vv = findVideo();
         if (!vv) return;
+        /* 안전장치: 오독이 싱크를 망치지 않도록, 연속 읽기가 영상 진행과
+           같은 속도(±2초)로 흐를 때만 신뢰한다 */
+        var trusted = false;
+        if (ocrPrev) {
+          var dRead = ev.time - ocrPrev.time;
+          var dVideo = vv.currentTime - ocrPrev.videoT;
+          trusted = Math.abs(dRead - dVideo) <= 2 && dRead >= 0 && dRead <= 30;
+        }
+        ocrPrev = { time: ev.time, videoT: vv.currentTime };
+        if (!trusted || ev.conf < 0.85) return;
         if (!calibrated) log("게임 시계 인식 성공 (" + Math.floor(ev.time / 60) + ":" + ("0" + ev.time % 60).slice(-2) + ") — 이후 시킹·일시정지 자동 추적");
         calibrated = true;
         anchor = { videoT: vv.currentTime, gameMs: gameStart.getTime() + ev.time * 1000 };
