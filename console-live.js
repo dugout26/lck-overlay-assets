@@ -1028,7 +1028,7 @@
     drawer.appendChild(modeCtl);
 
     drawer.appendChild(scaleCtl);
-    drawer.appendChild(sliderCtl('딜레이 보정', -180, 30, 10, delay,
+    drawer.appendChild(sliderCtl('딜레이 보정', -300, 30, 10, delay,
       function (v) { return (v > 0 ? '+' : '') + v + '초'; },
       function (v) { store.set('delay', v); if (opts.onDelayChange) opts.onDelayChange(v); }));
     drawer.appendChild(alphaCtl);
@@ -1352,13 +1352,23 @@
   }
   async function findLiveMatch() {
     var d = await api("getLive?hl=ko-KR");
-    var evs = (d.data.schedule || {}).events || [];
-    for (var i = 0; i < evs.length; i++) {
-      if (!isTarget(evs[i])) continue;
-      return { matchId: evs[i].match.id,
-               title: evs[i].match.teams.map(function (t) { return t.name; }).join(" vs ") };
+    var evs = ((d.data.schedule || {}).events || []).filter(isTarget);
+    if (!evs.length) return null;
+    var pick = evs[0];
+    if (evs.length > 1) {
+      /* 동시 라이브(LCK+CL 등): 방송 제목에 팀 코드가 있으면 그 경기 우선 (워치파티 대응) */
+      var title = (document.title || "").toUpperCase();
+      var hit = evs.filter(function (e) {
+        return e.match.teams.every(function (t) {
+          var code = String(t.code || t.name || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+          return code && code !== "TBD" && new RegExp("(^|[^A-Z0-9])" + code + "([^A-Z0-9]|$)").test(title);
+        });
+      })[0];
+      if (hit) pick = hit;
+      log("동시 라이브 " + evs.length + "건 → " + (hit ? "방송 제목으로 선택" : "첫 경기 선택 (톱니에서 변경 가능)"));
     }
-    return null;
+    return { matchId: pick.match.id,
+             title: pick.match.teams.map(function (t) { return t.code || t.name; }).join(" vs ") };
   }
 
   /* ── 시간축 원칙: 오버레이의 기준 시각은 "시청자가 보고 있는 화면의 시각" ──
