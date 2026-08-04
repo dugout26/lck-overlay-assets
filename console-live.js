@@ -1333,6 +1333,370 @@
 })();
 
 /**
+ * 게임 시계 OCR — 방송 화면 속 mm:ss 시계를 외부 라이브러리 없이 읽는다.
+ *
+ * 리워치 파티(과거 경기 재송출)에서는 스트리머가 영상을 멈추고 돌릴 때마다
+ * 싱크가 깨지므로, 화면의 게임 시계를 직접 계속 읽는 것이 유일한 완전 자동화다.
+ *
+ * 동작 원리 (폰트·위치·크기 사전 지식 없음):
+ *  A. 탐색   — 초 단위 숫자는 정확히 1Hz로 변한다. 저해상도로 프레임 차분을 누적해
+ *              1Hz 주기성 픽셀 클러스터를 찾으면 그것이 시계의 초 자리다.
+ *  B. 절단   — 그 행의 잉크 기둥 프로파일로 글자 칸(분:초 각 자리)을 분할한다.
+ *  C. 자가학습 — 초 자리는 0..9를 순서대로 순환한다. ~25초 관찰로 글리프 10개를
+ *              순서대로 수집하고, 십초 자리가 함께 변한 순간(9→0)으로 라벨을 고정한다.
+ *  D. 읽기   — 이후 1초마다 각 칸을 학습된 글리프와 대조해 mm:ss를 출력한다.
+ *
+ * 사용: var h = LCKClockOCR.start(videoEl, function (ev) { ... });
+ *   ev: { state: 'locating'|'calibrating'|'reading'|'lost', time?: 초, conf?: 0~1 }
+ *   h.stop()
+ */
+(function () {
+  "use strict";
+
+  var SCAN_W = 800;        // 탐색 단계 축소 폭 (작은 시계 획 보존)
+  var GLYPH_W = 10, GLYPH_H = 14; // 정규화 글리프 크기
+  var DIFF_T = 18;         // 픽셀 변화 판정 임계 (0-255 luma)
+
+  function lumaFrame(ctx, src, w, h) {
+    ctx.drawImage(src, 0, 0, w, h);
+    var d = ctx.getImageData(0, 0, w, h).data;
+    var out = new Uint8Array(w * h);
+    for (var i = 0, j = 0; j < out.length; i += 4, j++) {
+      out[j] = (d[i] * 3 + d[i + 1] * 4 + d[i + 2]) >> 3;
+    }
+    return out;
+  }
+
+  /* 연결 요소 라벨링 (4방향) — 마스크에서 후보 상자 추출 */
+  function components(mask, w, h) {
+    var seen = new Uint8Array(mask.length);
+    var boxes = [];
+    for (var y = 0; y < h; y++) {
+      for (var x = 0; x < w; x++) {
+        var idx = y * w + x;
+        if (!mask[idx] || seen[idx]) continue;
+        var q = [idx], minX = x, maxX = x, minY = y, maxY = y, n = 0;
+        seen[idx] = 1;
+        while (q.length) {
+          var c = q.pop();
+          n++;
+          var cx = c % w, cy = (c - cx) / w;
+          if (cx < minX) minX = cx; if (cx > maxX) maxX = cx;
+          if (cy < minY) minY = cy; if (cy > maxY) maxY = cy;
+          var nb = [c - 1, c + 1, c - w, c + w];
+          for (var k = 0; k < 4; k++) {
+            var m = nb[k];
+            if (m < 0 || m >= mask.length || seen[m] || !mask[m]) continue;
+            if (k < 2 && ((m % w === 0 && cx === w - 1) || (cx === 0 && m % w === w - 1))) continue;
+            seen[m] = 1;
+            q.push(m);
+          }
+        }
+        boxes.push({ x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1, n: n });
+      }
+    }
+    return boxes;
+  }
+
+  /* 칸 비트맵 → 정규화 글리프 (이진 배열) */
+  function glyphOf(ctx, video, box) {
+    var c = glyphOf._c || (glyphOf._c = document.createElement("canvas"));
+    c.width = GLYPH_W; c.height = GLYPH_H;
+    var g = c.getContext("2d", { willReadFrequently: true });
+    g.drawImage(video, box.x, box.y, box.w, box.h, 0, 0, GLYPH_W, GLYPH_H);
+    var d = g.getImageData(0, 0, GLYPH_W, GLYPH_H).data;
+    var lum = [], min = 255, max = 0;
+    for (var i = 0; i < d.length; i += 4) {
+      var v = (d[i] * 3 + d[i + 1] * 4 + d[i + 2]) >> 3;
+      lum.push(v);
+      if (v < min) min = v;
+      if (v > max) max = v;
+    }
+    var t = (min + max) / 2;
+    var bits = new Uint8Array(lum.length);
+    var ink = 0;
+    for (var j = 0; j < lum.length; j++) {
+      bits[j] = lum[j] > t ? 1 : 0; // 밝은 글자 가정
+      ink += bits[j];
+    }
+    return { bits: bits, ink: ink / bits.length, contrast: max - min };
+  }
+
+  function similarity(a, b) {
+    var same = 0;
+    for (var i = 0; i < a.length; i++) if (a[i] === b[i]) same++;
+    return same / a.length;
+  }
+
+  function start(video, cb) {
+    var stopped = false;
+    var canvas = document.createElement("canvas");
+    var ctx = canvas.getContext("2d", { willReadFrequently: true });
+    var state = { phase: "locating" };
+
+    function vw() { return video.videoWidth || video.width || 0; }
+    function vh() { return video.videoHeight || video.height || 0; }
+
+    /* ── A. 탐색: 6초간 4Hz 샘플링으로 1Hz 변화 픽셀 찾기 ── */
+    function locate(done) {
+      var w = SCAN_W, h = 0, prev = null, count = null, ticks = 0;
+      var timer = setInterval(function () {
+        if (stopped) return clearInterval(timer);
+        if (!vw()) return;
+        h = Math.round(vh() * w / vw());
+        canvas.width = w; canvas.height = h;
+        var cur = lumaFrame(ctx, video, w, h);
+        if (prev) {
+          if (!count) count = new Uint16Array(cur.length);
+          for (var i = 0; i < cur.length; i++) {
+            if (Math.abs(cur[i] - prev[i]) > DIFF_T) count[i]++;
+          }
+        }
+        prev = cur;
+        if (++ticks >= 24) { // 6초
+          clearInterval(timer);
+          var mask = new Uint8Array(count.length);
+          for (var j = 0; j < count.length; j++) {
+            mask[j] = (count[j] >= 3 && count[j] <= 9) ? 1 : 0; // ≈1Hz만
+          }
+          var boxes = components(mask, w, h).filter(function (b) {
+            return b.w >= 2 && b.w <= 30 && b.h >= 3 && b.h <= 36 && b.n >= 4;
+          });
+          boxes.sort(function (a, b) { return b.n - a.n; });
+          done(boxes.slice(0, 12), w, h);
+        }
+      }, 250);
+    }
+
+    /* ── A2. 주기성 검증: 진짜 시계는 메트로놈(간격 ≈1초, 편차 작음) ── */
+    function verifyPeriodicity(boxes, w, h, done) {
+      if (!boxes.length) return done(null);
+      var times = boxes.map(function () { return []; });
+      var prevFrame = null, ticks = 0;
+      var timer = setInterval(function () {
+        if (stopped) return clearInterval(timer);
+        canvas.width = w; canvas.height = h;
+        var cur = lumaFrame(ctx, video, w, h);
+        var now = ticks * 0.125;
+        if (prevFrame) {
+          for (var i = 0; i < boxes.length; i++) {
+            var b = boxes[i], diff = 0, n = 0;
+            for (var y = b.y; y < b.y + b.h; y++) {
+              for (var x = b.x; x < b.x + b.w; x++) {
+                var idx = y * w + x;
+                diff += Math.abs(cur[idx] - prevFrame[idx]);
+                n++;
+              }
+            }
+            /* 픽셀별 절대차 평균 — 잉크량이 비슷한 숫자 전환(7→1 등)도 획 위치가 다르면 잡힘 */
+            if (diff / n > 6) times[i].push(now);
+          }
+        }
+        prevFrame = cur;
+        if (++ticks >= 64) { // 8초
+          clearInterval(timer);
+          cb({ state: "vdebug", data: boxes.map(function (b, i) { return { b: b, ts: times[i] }; }) });
+          var best = null, bestScore = 0;
+          for (var j = 0; j < boxes.length; j++) {
+            var ts = times[j];
+            if (ts.length < 5 || ts.length > 11) continue;
+            var iv = [], mean = 0;
+            for (var k = 1; k < ts.length; k++) iv.push(ts[k] - ts[k - 1]);
+            iv.forEach(function (v) { mean += v; });
+            mean /= iv.length;
+            if (mean < 0.8 || mean > 1.35) continue;
+            var varsum = 0;
+            iv.forEach(function (v) { varsum += (v - mean) * (v - mean); });
+            var cv = Math.sqrt(varsum / iv.length) / mean;
+            if (cv > 0.35) continue;
+            var score = ts.length * (1 - cv);
+            if (score > bestScore) { bestScore = score; best = boxes[j]; }
+          }
+          done(best);
+        }
+      }, 125);
+    }
+
+    /* ── B. 절단: 후보 초-자리 상자 주변 행에서 글자 칸 분할 ── */
+    function segmentCells(candidate, scanW, scanH) {
+      var sx = vw() / scanW, sy = vh() / scanH;
+      var cy = (candidate.y + candidate.h / 2) * sy;
+      var ch = Math.max(10, candidate.h * sy * 1.5);
+      var y0 = Math.max(0, Math.round(cy - ch / 2));
+      /* 초 자리 오른쪽 여유 + 왼쪽으로 분까지: 후보 폭의 ~9배 스캔 */
+      var cw = candidate.w * sx;
+      var x1 = Math.min(vw(), Math.round((candidate.x + candidate.w) * sx + cw * 1.5));
+      var x0 = Math.max(0, Math.round(candidate.x * sx - cw * 8));
+      var w = x1 - x0, h = Math.round(ch);
+      if (w < 10 || h < 8) return null;
+      canvas.width = w; canvas.height = h;
+      ctx.drawImage(video, x0, y0, w, h, 0, 0, w, h);
+      var d = ctx.getImageData(0, 0, w, h).data;
+      var min = 255, max = 0, lum = new Uint8Array(w * h);
+      for (var i = 0, j = 0; i < d.length; i += 4, j++) {
+        lum[j] = (d[i] * 3 + d[i + 1] * 4 + d[i + 2]) >> 3;
+        if (lum[j] < min) min = lum[j];
+        if (lum[j] > max) max = lum[j];
+      }
+      if (max - min < 60) return null; // 대비 부족
+      var t = (min + max) / 2;
+      var col = new Float32Array(w);
+      for (var x = 0; x < w; x++) {
+        var ink = 0;
+        for (var y = 0; y < h; y++) if (lum[y * w + x] > t) ink++;
+        col[x] = ink / h;
+      }
+      /* 잉크 기둥 → 칸 경계 (gap 기준 분할) */
+      var rawCells = [], run = null;
+      for (var x2 = 0; x2 < w; x2++) {
+        if (col[x2] > 0.15) {
+          if (!run) run = { a: x2 };
+          run.b = x2;
+        } else if (run && x2 - run.b > 1) {
+          rawCells.push(run); run = null;
+        }
+      }
+      if (run) rawCells.push(run);
+      rawCells = rawCells.filter(function (c) { return c.b - c.a >= 1; });
+      /* 작은 글자는 숫자끼리 붙어 한 덩어리가 됨 → 기준 글자 폭(cw)으로 등분 */
+      var cells = [];
+      rawCells.forEach(function (c) {
+        var rw = c.b - c.a + 1;
+        var k = Math.max(1, Math.round(rw / (cw * 1.15)));
+        if (k === 1) { cells.push(c); return; }
+        for (var i = 0; i < k; i++) {
+          cells.push({ a: Math.round(c.a + rw * i / k), b: Math.round(c.a + rw * (i + 1) / k) - 1 });
+        }
+      });
+      if (cells.length < 3) return null;
+      /* 오른쪽에서: [초일][초십][콜론][분일]([분십]) — 콜론은 폭이 좁다 */
+      var abs = cells.map(function (c) {
+        return { x: x0 + c.a - 1, y: y0, w: c.b - c.a + 3, h: h };
+      }).reverse(); // 오른쪽부터
+      var secU = abs[0], secT = abs[1], rest = abs.slice(2);
+      /* 콜론 제거: 폭이 초일의 60% 미만인 칸 */
+      var minutes = rest.filter(function (c) { return c.w >= secU.w * 0.6; });
+      if (!secU || !secT || !minutes.length) return null;
+      return { secU: secU, secT: secT, minutes: minutes.slice(0, 2).reverse() };
+    }
+
+    /* ── C. 자가학습: 초 일의 자리 0..9 순환 수집, 십의 자리 변화 = 9→0 ── */
+    function calibrate(cells, done) {
+      var glyphs = [];   // { bits, tensChanged }
+      var lastU = null, lastT = null;
+      var timer = setInterval(function () {
+        if (stopped) return clearInterval(timer);
+        var gU = glyphOf(ctx, video, cells.secU);
+        var gT = glyphOf(ctx, video, cells.secT);
+        if (gU.contrast < 50) return;
+        if (lastU && similarity(gU.bits, lastU.bits) > 0.93) { lastT = gT; return; } // 변화 없음
+        var tensChanged = lastT ? similarity(gT.bits, lastT.bits) < 0.9 : false;
+        glyphs.push({ bits: gU.bits, tensChanged: tensChanged });
+        lastU = gU; lastT = gT;
+        if (glyphs.length >= 12) {
+          clearInterval(timer);
+          /* 9→0 전환(=십의 자리 동시 변화) 지점 찾기 */
+          var zeroIdx = -1;
+          for (var i = 1; i < glyphs.length; i++) {
+            if (glyphs[i].tensChanged) { zeroIdx = i; break; }
+          }
+          if (zeroIdx < 0) return done(null);
+          var tmpl = {};
+          for (var k = 0; k < 10; k++) {
+            var g = glyphs[zeroIdx + k];
+            if (!g) { // 순환 이전 구간에서 보충
+              g = glyphs[zeroIdx + k - 10];
+            }
+            if (!g) return done(null);
+            tmpl[k] = g.bits;
+          }
+          done(tmpl);
+        }
+      }, 200);
+    }
+
+    function classify(bits, tmpl, allow) {
+      var best = -1, bestS = 0, second = 0;
+      for (var d = 0; d <= 9; d++) {
+        if (allow && allow.indexOf(d) < 0) continue;
+        var s = similarity(bits, tmpl[d]);
+        if (s > bestS) { second = bestS; bestS = s; best = d; }
+        else if (s > second) second = s;
+      }
+      return { digit: best, conf: bestS, margin: bestS - second };
+    }
+
+    /* ── D. 읽기 ── */
+    function readLoop(cells, tmpl) {
+      var misses = 0;
+      var timer = setInterval(function () {
+        if (stopped) return clearInterval(timer);
+        var gU = glyphOf(ctx, video, cells.secU);
+        var gT = glyphOf(ctx, video, cells.secT);
+        if (gU.contrast < 50) {
+          if (++misses > 15) { clearInterval(timer); restart(); }
+          else cb({ state: "lost" });
+          return;
+        }
+        var u = classify(gU.bits, tmpl);
+        var t = classify(gT.bits, tmpl, [0, 1, 2, 3, 4, 5]);
+        var mins = 0, mConf = 1;
+        for (var i = 0; i < cells.minutes.length; i++) {
+          var gm = glyphOf(ctx, video, cells.minutes[i]);
+          if (gm.ink < 0.04) continue; // 빈 칸 (한 자리 분)
+          var m = classify(gm.bits, tmpl);
+          mins = mins * 10 + m.digit;
+          mConf = Math.min(mConf, m.conf);
+        }
+        var conf = Math.min(u.conf, t.conf, mConf);
+        if (conf < 0.78) {
+          if (++misses > 15) { clearInterval(timer); restart(); }
+          else cb({ state: "lost" });
+          return;
+        }
+        misses = 0;
+        cb({ state: "reading", time: mins * 60 + t.digit * 10 + u.digit, conf: conf });
+      }, 1000);
+    }
+
+    function restart() {
+      if (!stopped) run();
+    }
+
+    function run() {
+      cb({ state: "locating" });
+      locate(function (candidates, w, h) {
+        if (stopped) return;
+        if (!candidates.length) return setTimeout(restart, 2000);
+        cb({ state: "cand", boxes: candidates, scanW: w, scanH: h }); // 디버그
+        verifyPeriodicity(candidates, w, h, function (best) {
+          if (stopped) return;
+          if (!best) return setTimeout(restart, 2000);
+          proceed(best, w, h);
+        });
+      });
+    }
+
+    function proceed(candidate, w, h) {
+        var cells = segmentCells(candidate, w, h);
+        if (!cells) return setTimeout(restart, 5000);
+        cb({ state: "cells", cells: cells }); // 디버그: 선택된 칸 좌표
+        cb({ state: "calibrating" });
+        calibrate(cells, function (tmpl) {
+          if (stopped) return;
+          if (!tmpl) return setTimeout(restart, 3000);
+          readLoop(cells, tmpl);
+        });
+    }
+
+    run();
+    return { stop: function () { stopped = true; } };
+  }
+
+  window.LCKClockOCR = { start: start };
+})();
+
+/**
  * SOOP LCK 룬 오버레이 — 라이브 데이터 클라이언트 (브라우저용)
  *
  * 라이엇 esports-api·livestats를 직접 폴링해 오버레이 state를 만든다.
@@ -1784,9 +2148,23 @@
     /* 영상 앵커: 리플레이 시계를 video 재생 위치에 묶는다.
        시킹·일시정지가 데이터에 그대로 반영되고, '게임 시간' 입력은 오프셋 보정 1회. */
     var anchor = null; // { videoT: video.currentTime, gameMs: 그때의 게임 시각 }
-    var calibrated = false; // '게임 시간' 입력으로 싱크를 맞췄는가
+    var calibrated = false; // 싱크가 맞춰졌는가 (시계 OCR 또는 수동 입력)
     var v0 = findVideo();
     if (v0) anchor = { videoT: v0.currentTime, gameMs: replayClock.getTime() };
+
+    /* 게임 시계 OCR: 화면 속 mm:ss를 계속 읽어 자가 재동기화 —
+       리워치 파티에서 스트리머가 영상을 멈추거나 돌려도 자동으로 따라간다 */
+    var ocr = null;
+    if (typeof LCKClockOCR !== "undefined" && v0) {
+      ocr = LCKClockOCR.start(v0, function (ev) {
+        if (ev.state !== "reading") return;
+        var vv = findVideo();
+        if (!vv) return;
+        if (!calibrated) log("게임 시계 인식 성공 (" + Math.floor(ev.time / 60) + ":" + ("0" + ev.time % 60).slice(-2) + ") — 이후 시킹·일시정지 자동 추적");
+        calibrated = true;
+        anchor = { videoT: vv.currentTime, gameMs: gameStart.getTime() + ev.time * 1000 };
+      });
+    }
 
     async function tick() {
       var v = findVideo();
@@ -1805,7 +2183,7 @@
     await tick();
     var timer = setInterval(function () { tick().catch(function (e) { log("폴링 오류: " + e.message); }); }, 10000);
     return {
-      stop: function () { clearInterval(timer); },
+      stop: function () { clearInterval(timer); if (ocr) ocr.stop(); },
       live: false, matchId: matchId, title: title, setNumber: n, setCount: games.length,
       setClock: function (sec) {
         replayClock = new Date(gameStart.getTime() + sec * 1000);
