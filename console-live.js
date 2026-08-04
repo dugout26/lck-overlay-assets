@@ -1697,6 +1697,7 @@
     /* 영상 앵커: 리플레이 시계를 video 재생 위치에 묶는다.
        시킹·일시정지가 데이터에 그대로 반영되고, '게임 시간' 입력은 오프셋 보정 1회. */
     var anchor = null; // { videoT: video.currentTime, gameMs: 그때의 게임 시각 }
+    var calibrated = false; // '게임 시간' 입력으로 싱크를 맞췄는가
     var v0 = findVideo();
     if (v0) anchor = { videoT: v0.currentTime, gameMs: replayClock.getTime() };
 
@@ -1704,6 +1705,11 @@
       var v = findVideo();
       if (anchor && v) {
         replayClock = new Date(anchor.gameMs + (v.currentTime - anchor.videoT) * 1000);
+        /* 싱크가 맞춰진 뒤라면 게임 시작 전(밴픽·대기 화면) 구간을 알 수 있다 → 픽 스포일러 차단 */
+        if (calibrated && replayClock < gameStart) {
+          if (opts.onPregame) opts.onPregame();
+          return;
+        }
       } else {
         replayClock = new Date(replayClock.getTime() + 10000);
       }
@@ -1718,6 +1724,7 @@
         replayClock = new Date(gameStart.getTime() + sec * 1000);
         var v = findVideo();
         anchor = v ? { videoT: v.currentTime, gameMs: replayClock.getTime() } : null;
+        calibrated = !!anchor;
         goldHistory.length = 0; // 점프 시 그래프 재수집 (연속성 없음)
         tick().catch(function (e) { log("이동 실패: " + e.message); });
       }
@@ -1796,14 +1803,29 @@
       onSyncClock: function (sec) { if (handle && handle.setClock) handle.setClock(sec); }
     };
   }
+  var pregame = false;
+  var hinted = false;
   function onState(state) {
     var s = capture();
     if (api) api.destroy();
     api = LCKOverlay.mount(host, state, { source: makeSource() });
     restore(s);
+    if (pregame) { api.root.classList.remove("min"); pregame = false; } // 밴픽 구간 벗어남 → 자동 복귀
+    if (!hinted && handle && !handle.live) {
+      hinted = true;
+      api.notify({ text: "화면과 시간을 맞추려면 톱니 → 게임 시간에 화면 속 시계를 입력하세요" });
+    }
+  }
+  function onPregame() {
+    /* 게임 시작 전(밴픽) 구간: 픽 스포일러 방지를 위해 필로 접기 (펼치기는 본인 선택) */
+    if (!pregame && api) {
+      pregame = true;
+      api.root.classList.add("min");
+      console.log("[LCK 오버레이] 게임 시작 전 구간 — 픽 노출 방지를 위해 접어둠");
+    }
   }
   function boot() {
-    LCKLive.start({ matchId: sel && sel.matchId, setNumber: sel && sel.setNumber, onState: onState })
+    LCKLive.start({ matchId: sel && sel.matchId, setNumber: sel && sel.setNumber, onState: onState, onPregame: onPregame })
       .then(function (h) {
         if (h) {
           handle = h;
