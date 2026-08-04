@@ -3226,9 +3226,19 @@
     return;
   }
   window.__lckovConsole = true;
-  console.log(&quot;[LCK 오버레이] 번들 0805-08:19 로드&quot;); // ↻ 적용 여부 확인용
+  console.log(&quot;[LCK 오버레이] 번들 0805-08:47 로드&quot;); // ↻ 적용 여부 확인용
   /* 확장 content script에서만 true — 자동 실행이므로 무관한 방송에는 오버레이를 띄우지 않는다 */
   var AUTO = !!(typeof chrome !== &quot;undefined&quot; &amp;&amp; chrome.runtime &amp;&amp; chrome.runtime.id);
+  /* 북마클릿(수동 실행)을 SOOP이 아닌 페이지에서 눌렀을 때는 한 번 확인 —
+     리플레이 폴백이 무관한 페이지에 뜨는 것 방지 */
+  var SOOP_PAGE = /(^|\.)(sooplive\.(co\.kr|com)|afreecatv\.com)$/.test(location.hostname);
+  if (!AUTO &amp;&amp; !SOOP_PAGE) {
+    if (!window.confirm(&quot;SOOP 페이지가 아닙니다.
+테스트용으로 여기에 오버레이를 띄울까요?&quot;)) {
+      window.__lckovConsole = false;
+      return;
+    }
+  }
   var host = document.createElement(&quot;div&quot;);
   host.id = &quot;lckov-host&quot;;
   document.documentElement.appendChild(host);
