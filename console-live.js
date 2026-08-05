@@ -2818,6 +2818,10 @@
           if (sel.e.end && target > sel.e.end) target = sel.e.end;       // 종료된 세트면 마지막 장면 유지
           var minT = new Date(sel.e.start.getTime() + 15000);
           if (target < minT) target = minT;                               // 피드 시작 직전 204 방지
+          /* 피드는 실제 경기보다 ~20-30초 늦게 공급 — 딜레이 0(송출 모드)이어도
+             아직 존재하지 않는 프레임을 요청하면 204만 반복되므로 최신 공급분까지로 클램프 */
+          var newest = new Date(Date.now() - 35000);
+          if (target > newest && newest >= minT) target = newest;
           var st = await fetchAndEmit(curId, curNum, curStart, target, histories[curId], opts, true);
           /* 라이엇 이벤트 상태 갱신이 늦어도(2026-08 실측) 피드의 finished 신호로 세트 종료를 직접 판정
              — 시계를 실제 종료 시각에 고정하고, 다음 세트가 시작되면 refreshRanges가 자동 전환 */
@@ -3272,7 +3276,7 @@
     return;
   }
   window.__lckovConsole = true;
-  console.log("[LCK 오버레이] 번들 0805-15:47 로드"); // ↻ 적용 여부 확인용
+  console.log("[LCK 오버레이] 번들 0805-15:49 로드"); // ↻ 적용 여부 확인용
   /* 확장 content script에서만 true — 자동 실행이므로 무관한 방송에는 오버레이를 띄우지 않는다 */
   var AUTO = !!(typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.id);
   /* 방송 소스 모드(OBS 브라우저 소스·크로마키 캡처용 단독 페이지): SOOP 페이지가 아니어도
