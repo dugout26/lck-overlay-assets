@@ -307,7 +307,8 @@
     '.dndzone:hover .tag, .dndzone.sel .tag { opacity: 1; }',
     '.dndzone.zleft .tag { left: calc(100% + 8px); } .dndzone.zright .tag { right: calc(100% + 8px); }',
     '.dnd-pop {',
-    '  display: none; position: fixed; width: 502px; z-index: 1; transform: scale(var(--ui-scale));',
+    '  display: none; position: fixed; width: 502px; z-index: 1;',
+    '  transform: scale(calc(var(--ui-scale) * var(--dnd-scale, 1)));', // 게임 화면 크기 비례 축소
     '  background: rgb(14 17 23 / var(--bg-a)); border: 1px solid var(--line); border-radius: 12px;',
     '  backdrop-filter: blur(16px) saturate(1.3); -webkit-backdrop-filter: blur(16px) saturate(1.3);',
     '  box-shadow: 0 12px 40px rgba(0,0,0,0.55);',
@@ -1206,7 +1207,8 @@
     /* 기본 좌표는 실제 LCK 방송 HUD 실측값 (2026-08-04, 16:9 기준) — 좌우 선수 바 5개.
        width는 영상 높이 대비 % (40 초과면 legacy px). 존은 행 간 빈틈 없이 이어붙여
        중계/옵저버 레이아웃의 세로 오차가 있어도 근처 클릭이 해당 순번 선수로 이어지게 한다 */
-    var DND = state.dndLayout || { top: 8, step: 9.6, height: 9.6, width: 13 };
+    /* height·width는 앵커(게임 화면) 높이 대비 % — 실측: HUD 바 ≈ 높이의 10.5%w × 7.4%h */
+    var DND = state.dndLayout || { top: 8, step: 9.6, height: 7.4, width: 10.5 };
     var dndzones = el('div', 'dndzones');
     var dndPop = el('div', 'dnd-pop');
     dndPop.style.display = 'none';
@@ -1287,6 +1289,9 @@
         if (z.classList.contains('zleft')) { z.style.left = leftX + 'px'; z.style.right = 'auto'; }
         else { z.style.right = rightX + 'px'; z.style.left = 'auto'; }
       });
+      /* 팝업도 게임 화면 크기에 비례해 축소 (앵커 높이 1000px 기준 1.0, 최소 0.5) */
+      var k = Math.max(0.5, Math.min(1, b.height / 1000));
+      root.style.setProperty('--dnd-scale', Math.round(k * 100) / 100);
     }
     var zoneTimer = setInterval(function () {
       if (root.classList.contains('dnd')) positionZones();
@@ -3178,7 +3183,7 @@
     return;
   }
   window.__lckovConsole = true;
-  console.log("[LCK 오버레이] 번들 0805-08:47 로드"); // ↻ 적용 여부 확인용
+  console.log("[LCK 오버레이] 번들 0805-09:11 로드"); // ↻ 적용 여부 확인용
   /* 확장 content script에서만 true — 자동 실행이므로 무관한 방송에는 오버레이를 띄우지 않는다 */
   var AUTO = !!(typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.id);
   /* 북마클릿(수동 실행)을 SOOP이 아닌 페이지에서 눌렀을 때는 한 번 확인 —
