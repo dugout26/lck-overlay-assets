@@ -3235,7 +3235,7 @@
     return;
   }
   window.__lckovConsole = true;
-  console.log("[LCK 오버레이] 번들 0805-15:17 로드"); // ↻ 적용 여부 확인용
+  console.log("[LCK 오버레이] 번들 0805-15:21 로드"); // ↻ 적용 여부 확인용
   /* 확장 content script에서만 true — 자동 실행이므로 무관한 방송에는 오버레이를 띄우지 않는다 */
   var AUTO = !!(typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.id);
   /* 방송 소스 모드(OBS 브라우저 소스·크로마키 캡처용 단독 페이지): SOOP 페이지가 아니어도
@@ -3370,6 +3370,7 @@
     };
   }
   var pregame = false;
+  var srcDndInit = false;
   var hinted = false;
   function onState(state) {
     if (api && api.isCalibrating && api.isCalibrating()) return; // 영역 조절 중 재마운트 금지
@@ -3378,6 +3379,12 @@
     /* tickClock: 폴링(10초) 사이에도 시계가 1초씩 흐르게 — 다음 폴링이 오차를 보정 */
     api = LCKOverlay.mount(host, state, { source: makeSource(), tickClock: true });
     restore(s);
+    /* 송출 소스 모드 기본값: 방해금지(선수 클릭 → 룬 팝업)로 시작 — 큰 패널이 방송을 가리지 않게.
+       ?dnd=0으로 끌 수 있고, 스트리머가 직접 토글하면 그 선택을 유지한다 */
+    if (SOURCE && !srcDndInit) {
+      srcDndInit = true;
+      if (QS.dnd !== "0" && !(s && s.dnd) && api.setDnd) api.setDnd(true);
+    }
     if (pregame) { api.root.classList.remove("min"); pregame = false; } // 밴픽 구간 벗어남 → 자동 복귀
     if (!hinted && handle && !handle.live) {
       hinted = true;
