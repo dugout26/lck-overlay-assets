@@ -83,6 +83,46 @@ def map_event(ev):
     }
 
 
+def feed_started(game_id):
+    """livestats 피드에 프레임이 있으면 그 세트는 실제로 시작된 것"""
+    try:
+        req = urllib.request.Request("https://feed.lolesports.com/livestats/v1/window/" + str(game_id))
+        with urllib.request.urlopen(req, timeout=10) as r:
+            if r.status != 200:
+                return False
+            body = r.read()
+        return bool(body) and bool(json.loads(body).get("frames"))
+    except Exception:
+        return False
+
+
+def probe_live(sched_events, now):
+    """gql 이벤트 상태가 늦게 갱신되는 문제(CL에서 실측) 보정:
+    오늘 경기 중 gql이 미시작이라 해도 피드에 데이터가 흐르면 진행 중으로 승격"""
+    found = []
+    for e in sched_events:
+        if e.get("state") == "completed":
+            continue
+        try:
+            st = datetime.strptime(e.get("startTime", ""), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+        if not (timedelta(hours=-12) <= now - st <= timedelta(hours=12)):
+            continue
+        started = [g for g in e["_games"] if feed_started(g.get("id"))]
+        if not started:
+            continue
+        e["state"] = "inProgress"
+        last = started[-1]
+        for g in e["_games"]:
+            if g is last:
+                g["state"] = "inProgress"
+            elif g in started:
+                g["state"] = "completed"
+        found.append(e)
+    return found
+
+
 def main():
     outdir = sys.argv[1] if len(sys.argv) > 1 else "out"
     os.makedirs(outdir, exist_ok=True)
@@ -99,6 +139,11 @@ def main():
 
     live_events = [map_event(e) for e in live_raw]
     sched_events = [map_event(e) for e in sched_raw]
+
+    have = set((e.get("match") or {}).get("id") for e in live_events)
+    for e in probe_live(sched_events, now):
+        if (e.get("match") or {}).get("id") not in have:
+            live_events.append(e)
 
     def dump(name, obj):
         with open(os.path.join(outdir, name), "w", encoding="utf-8") as f:
