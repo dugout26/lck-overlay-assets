@@ -45,6 +45,29 @@
     </ol>
   </div>
 
+  <h2 class="alt">기능 안내</h2>
+  <div style="font-size:13px;line-height:1.9;color:#C9CDD6;margin-bottom:6px">
+    <p style="margin:6px 0"><b style="color:#E8C36B">패널 탭 4개</b></p>
+    <ul style="margin:0 0 12px 20px">
+      <li><b>선수</b> — 10인 카드(레벨·KDA·CS·골드·체력). 카드 클릭 → 룬 풀페이지(키스톤·메인/서브 트리·스탯 조각)와 아이템, 스킬 마스터 순서·킬관여·와드. <b>"↔ 라인 상대 비교"</b>를 누르면 같은 포지션 두 선수의 룬과 레벨·CS·골드 격차를 나란히 보여줍니다.</li>
+      <li><b>룬</b> — 10인 전원의 룬을 아이콘으로 한눈에. 아이콘에 마우스를 올리면 이름, 행 클릭 시 상세로 이동.</li>
+      <li><b>지표</b> — 골드 · 딜 비중 · KDA · CS/분 · 킬관여 · 와드를 팀별 순위로 비교.</li>
+      <li><b>골드 그래프</b> — 팀 골드 차이 추이 (앞선 팀 색으로 표시).</li>
+    </ul>
+    <p style="margin:6px 0"><b style="color:#E8C36B">조작</b></p>
+    <ul style="margin:0 0 12px 20px">
+      <li>헤더를 잡고 <b>드래그</b>로 이동 · 헤더 <b>×</b>로 작은 필로 접기 · 필 옆 <b>⊗</b>로 완전 숨김</li>
+      <li><b>방해금지 모드</b>(설정에서 켬) — 패널이 사라지고, 중계 화면 좌우의 선수 자리를 클릭하면 그 선수 룬만 팝업으로.</li>
+      <li><b>설정(톱니)</b> — 경기·세트 선택, 게임 시간 싱크, 모드(개인 시청/스트리머 송출), UI 크기(자동), 딜레이 보정, 투명도, 표시 항목 켜고 끄기, 게임 화면 영역·선수 존 위치 맞추기.</li>
+    </ul>
+    <p style="margin:6px 0"><b style="color:#E8C36B">자동으로 되는 것들</b> — 라이브 경기 감지 · 공식 다시보기 시간 싱크(시킹 포함) · 워치파티 게임 시계 인식 · 밴픽 구간 픽 스포일러 차단 · 라이브 되감기 추적</p>
+    <p style="margin:10px 0 4px"><b style="color:#E8C36B">단축키</b> (SOOP 탭에서, 채팅 입력 중엔 무시됨)</p>
+    <table style="border-collapse:collapse;font-size:12.5px">
+      <tr><td style="padding:3px 14px 3px 0"><code>Alt + L</code></td><td>오버레이 전체 표시 / 숨김</td></tr>
+      <tr><td style="padding:3px 14px 3px 0"><code>Alt + K</code></td><td>방해금지 모드 켜기 / 끄기</td></tr>
+    </table>
+  </div>
+
   <h2 class="alt">방법 2 — 콘솔 붙여넣기</h2>
   <ol>
     <li>SOOP에서 아무 방송이나 엽니다 (경기 중계면 최고, 아니어도 리플레이 모드로 동작)</li>
@@ -3233,7 +3256,7 @@
     return;
   }
   window.__lckovConsole = true;
-  console.log(&quot;[LCK 오버레이] 번들 0805-09:00 로드&quot;); // ↻ 적용 여부 확인용
+  console.log(&quot;[LCK 오버레이] 번들 0805-09:01 로드&quot;); // ↻ 적용 여부 확인용
   /* 확장 content script에서만 true — 자동 실행이므로 무관한 방송에는 오버레이를 띄우지 않는다 */
   var AUTO = !!(typeof chrome !== &quot;undefined&quot; &amp;&amp; chrome.runtime &amp;&amp; chrome.runtime.id);
   /* 북마클릿(수동 실행)을 SOOP이 아닌 페이지에서 눌렀을 때는 한 번 확인 —
