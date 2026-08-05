@@ -3340,7 +3340,7 @@
     return;
   }
   window.__lckovConsole = true;
-  console.log(&quot;[LCK 오버레이] 번들 0805-15:13 로드&quot;); // ↻ 적용 여부 확인용
+  console.log(&quot;[LCK 오버레이] 번들 0805-15:17 로드&quot;); // ↻ 적용 여부 확인용
   /* 확장 content script에서만 true — 자동 실행이므로 무관한 방송에는 오버레이를 띄우지 않는다 */
   var AUTO = !!(typeof chrome !== &quot;undefined&quot; &amp;&amp; chrome.runtime &amp;&amp; chrome.runtime.id);
   /* 방송 소스 모드(OBS 브라우저 소스·크로마키 캡처용 단독 페이지): SOOP 페이지가 아니어도
@@ -3350,8 +3350,13 @@
   try {
     location.search.replace(/[?&amp;]([^=&amp;]+)=([^&amp;]*)/g, function (_, k, v) { QS[k] = decodeURIComponent(v); return _; });
   } catch (e) {}
-  if (SOURCE &amp;&amp; QS.delay &amp;&amp; !localStorage.getItem(&quot;lckov.delay&quot;)) {
-    try { localStorage.setItem(&quot;lckov.delay&quot;, String(parseInt(QS.delay, 10) || -60)); } catch (e) {}
+  if (SOURCE) {
+    /* 송출용 기본 딜레이 0 — 스트리머가 방송에 얹는 순간이 기준이라 시청자용 보수값(-60)을 쓰지 않는다.
+       ?delay= 파라미터는 항상 우선 적용 */
+    try {
+      if (QS.delay) localStorage.setItem(&quot;lckov.delay&quot;, String(parseInt(QS.delay, 10) || 0));
+      else if (localStorage.getItem(&quot;lckov.delay&quot;) === null) localStorage.setItem(&quot;lckov.delay&quot;, &quot;0&quot;);
+    } catch (e) {}
   }
   /* 북마클릿(수동 실행)을 SOOP이 아닌 페이지에서 눌렀을 때는 한 번 확인 —
      리플레이 폴백이 무관한 페이지에 뜨는 것 방지 */
