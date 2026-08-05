@@ -2293,9 +2293,21 @@
   /* 방송 제목에 두 팀이 모두 등장하는가 (워치파티 인식)
      — 영문 코드(HLE·KT)는 단어 경계 매칭, 한글 팀명·별칭은 공백 무시 부분 일치.
      한 글자 별명("든"·"슼")은 "모든" 같은 오탐을 막기 위해 앞뒤가 한글이 아닐 때만 인정. */
+  /* 방송 제목 텍스트 — SOOP 라이브 페이지는 document.title에 방송 제목이 없어서
+     (채널명만 나옴, 2026-08-05 실측) og:title·#infoTitle까지 합쳐서 본다 */
+  function broadcastText() {
+    var t = document.title || "";
+    try {
+      var og = document.querySelector('meta[property="og:title"]');
+      if (og && og.content) t += " " + og.content;
+      var el = document.getElementById("infoTitle");
+      if (el && el.textContent) t += " " + el.textContent;
+    } catch (e) {}
+    return t;
+  }
   function aliasInTitle(alias) {
     var a = String(alias || "").toUpperCase();
-    var title = (document.title || "").toUpperCase();
+    var title = broadcastText().toUpperCase();
     if (/[가-힣]/.test(a)) {
       var h = a.replace(/[^A-Z0-9가-힣]/g, "");
       if (!h) return false;
@@ -2317,14 +2329,18 @@
   }
   /* 제목이 LCK 방송임을 표시하는가 (#LckWatchParty 태그, "LCK" 언급) */
   function titleSaysLck() {
-    return /LCK/i.test(document.title || "");
+    return /LCK/i.test(broadcastText());
   }
-  async function findLiveMatch() {
+  async function findLiveMatch(wantId) {
     var d = await api("getLive?hl=ko-KR");
     var evs = ((d.data.schedule || {}).events || []).filter(isTarget);
     if (!evs.length) return null;
     var pick = evs[0];
-    if (evs.length > 1) {
+    var want = wantId && evs.filter(function (e) { return String(e.match.id) === String(wantId); })[0];
+    if (want) {
+      pick = want;
+      log("선택한 라이브 경기로 시작");
+    } else if (evs.length > 1) {
       /* 동시 라이브(LCK+CL 등): 방송 제목에 팀이 있으면 그 경기 우선 (워치파티 대응) */
       var hit = evs.filter(function (e) { return teamsInTitle(e.match.teams); })[0];
       if (hit) pick = hit;
@@ -2673,6 +2689,7 @@
     var dispElapsed = Math.max(0, Math.round((target - gameStart) / 1000));
     var state = buildState(win, det, dd, { gameNumber: gameNumber, elapsed: dispElapsed, goldHistory: visible });
     state.gameState = f.gameState;
+    state.frameTs = f.rfc460Timestamp; // 실제 마지막 프레임 시각 (세트 종료 판정용)
     state.live = !!isLive; // 오버레이 헤더 LIVE/다시보기 구분
     if (opts.onState) opts.onState(state);
     return state;
@@ -2705,7 +2722,7 @@
       log("진행 중인 LCK·챌린저스 경기 탐색...");
       var live = null;
       try {
-        live = await findLiveMatch();
+        live = await findLiveMatch(opts.liveMatchId);
       } catch (e) {
         /* esports-api 실패(403·네트워크 등)로 자동 감지가 죽지 않게 — 다시보기·제목 경로로 폴백 */
         log("경기 정보 API 오류(" + (e && e.message ? e.message : e) + ") — 대체 경로 시도");
@@ -2774,7 +2791,13 @@
           if (sel.e.end && target > sel.e.end) target = sel.e.end;       // 종료된 세트면 마지막 장면 유지
           var minT = new Date(sel.e.start.getTime() + 15000);
           if (target < minT) target = minT;                               // 피드 시작 직전 204 방지
-          await fetchAndEmit(curId, curNum, curStart, target, histories[curId], opts, true);
+          var st = await fetchAndEmit(curId, curNum, curStart, target, histories[curId], opts, true);
+          /* 라이엇 이벤트 상태 갱신이 늦어도(2026-08 실측) 피드의 finished 신호로 세트 종료를 직접 판정
+             — 시계를 실제 종료 시각에 고정하고, 다음 세트가 시작되면 refreshRanges가 자동 전환 */
+          if (st && st.gameState === "finished" && !sel.e.end) {
+            sel.e.end = st.frameTs ? new Date(st.frameTs) : new Date(target.getTime());
+            log(curNum + "세트 종료 — 다음 세트 시작 시 자동 전환");
+          }
         }
 
         /* 방송 시계 OCR → 딜레이 오프셋 자동 보정 (기본 −60초는 보수적 초기값일 뿐) */
@@ -3187,7 +3210,21 @@
     };
   }
 
-  window.LCKLive = { start: start, listRecent: listRecent, listSeason: listSeason };
+  /* 진행 중 경기 목록 — 경기 선택 드롭다운에서 동시 라이브 중 수동 선택용 */
+  async function listLive() {
+    try {
+      var d = await api("getLive?hl=ko-KR");
+      var evs = (((d || {}).data || {}).schedule || {}).events || [];
+      return evs.filter(isTarget).map(function (e) {
+        var isCL = String((e.league || {}).id) === "98767991335774713";
+        var codes = e.match.teams.map(function (t) { return t.code || t.name; });
+        return { matchId: e.match.id, live: true, teams: e.match.teams,
+                 label: "LIVE · " + codes.join(" vs ") + (isCL ? " (CL)" : " (LCK)") };
+      });
+    } catch (e) { return []; }
+  }
+
+  window.LCKLive = { start: start, listRecent: listRecent, listSeason: listSeason, listLive: listLive };
 })();
 
 
@@ -3198,7 +3235,7 @@
     return;
   }
   window.__lckovConsole = true;
-  console.log("[LCK 오버레이] 번들 0805-13:24 로드"); // ↻ 적용 여부 확인용
+  console.log("[LCK 오버레이] 번들 0805-14:45 로드"); // ↻ 적용 여부 확인용
   /* 확장 content script에서만 true — 자동 실행이므로 무관한 방송에는 오버레이를 띄우지 않는다 */
   var AUTO = !!(typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.id);
   /* 북마클릿(수동 실행)을 SOOP이 아닌 페이지에서 눌렀을 때는 한 번 확인 —
@@ -3293,13 +3330,18 @@
   function makeSource() {
     return {
       matches: sourceMatches(),
-      currentMatchId: (handle && !handle.live && handle.matchId) || (sel && sel.matchId) || "",
+      currentMatchId: (handle && !handle.live && handle.matchId) || (sel && (sel.matchId || sel.liveMatchId)) || "",
       setCount: (handle && handle.setCount) || 1,
       setNumber: (handle && handle.setNumber) || 1,
       canSync: !!(handle && handle.setClock),
       needsSync: !!(handle && handle.live === false && handle.synced === false),
       onSelectMatch: function (id) {
-        sel = id ? { matchId: id, setNumber: 1 } : null;
+        var hit = null;
+        for (var i = 0; i < matches.length; i++) {
+          if (String(matches[i].matchId) === String(id)) { hit = matches[i]; break; }
+        }
+        /* 라이브 항목 선택 → 그 경기를 라이브 모드로 추적 (동시 라이브·공식 중계 채널 대응) */
+        sel = id ? (hit && hit.live ? { liveMatchId: id } : { matchId: id, setNumber: 1 }) : null;
         saveSel();
         restart();
       },
@@ -3345,7 +3387,7 @@
     restart();
   }
   function boot() {
-    LCKLive.start({ auto: AUTO, matchId: sel && sel.matchId, setNumber: sel && sel.setNumber, onState: onState, onPregame: onPregame, onSetHint: onSetHint })
+    LCKLive.start({ auto: AUTO, matchId: sel && sel.matchId, liveMatchId: sel && sel.liveMatchId, setNumber: sel && sel.setNumber, onState: onState, onPregame: onPregame, onSetHint: onSetHint })
       .then(function (h) {
         if (h) {
           handle = h;
@@ -3373,8 +3415,14 @@
     handle = null;
     boot();
   }
-  /* 경기 선택 드롭다운: 다시보기 페이지에서는 시즌 전체, 그 외에는 최근 12일 */
-  var listApi = /(^|\.)vod\./.test(location.hostname) ? LCKLive.listSeason : LCKLive.listRecent;
-  listApi().then(function (m) { matches = m; }).catch(function () {});
+  /* 경기 선택 드롭다운: 다시보기 페이지에서는 시즌 전체, 그 외에는 라이브 + 최근 12일 */
+  var IS_VOD_PAGE = /(^|\.)vod\./.test(location.hostname);
+  var listApi = IS_VOD_PAGE ? LCKLive.listSeason : LCKLive.listRecent;
+  listApi().then(function (m) {
+    if (IS_VOD_PAGE) { matches = m; return; }
+    LCKLive.listLive()
+      .then(function (lv) { matches = lv.concat(m); })
+      .catch(function () { matches = m; });
+  }).catch(function () {});
   boot();
 })();
