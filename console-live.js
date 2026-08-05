@@ -2210,8 +2210,8 @@
 /**
  * SOOP LCK 룬 오버레이 — 라이브 데이터 클라이언트 (브라우저용)
  *
- * 라이엇 esports-api·livestats를 직접 폴링해 오버레이 state를 만든다.
- * 두 API 모두 CORS 개방(Access-Control-Allow-Origin: *)이라 어느 페이지에서든 동작 (2026-08-04 실측).
+ * 경기 정보는 GitHub Actions 중계 JSON(raw CDN), 실시간 데이터는 라이엇 livestats 피드를 폴링한다.
+ * 두 소스 모두 CORS 개방(Access-Control-Allow-Origin: *)이라 어느 페이지에서든 동작.
  * 지금은 콘솔 주입 테스트용으로 쓰고, 확장에서는 이 로직이 background service worker로 들어간다.
  *
  * 사용: LCKLive.start({ onState: function (state) { ... } })
@@ -2221,8 +2221,9 @@
 (function () {
   "use strict";
 
-  var API = "https://esports-api.lolesports.com/persisted/gw";
-  var KEY = "0TvQnueqKa5mxJntVWt0w4LpLfEkrV1Ta8rQBb9Z"; // lolesports.com 공개 키
+  /* 구 esports-api(공개 키)는 2026-08-05 라이엇이 전면 차단(전 IP·전 오리진 403/CORS 거부).
+     GitHub Actions 중계가 같은 응답 모양의 정적 JSON을 data 브랜치에 공급한다 — tools/relay.py 참고 */
+  var RELAY = "https://raw.githubusercontent.com/dugout26/lck-overlay-assets/data/";
   var FEED = "https://feed.lolesports.com/livestats/v1";
   var DD = "https://ddragon.leagueoflegends.com";
   var LEAGUE_IDS = ["98767991310872058", "98767991335774713"]; // LCK, LCK CL — 원격 설정으로 이관 예정
@@ -2252,7 +2253,15 @@
       return await r.json();
     } catch (e) { return null; }
   }
-  function api(path) { return j(API + "/" + path, { "x-api-key": KEY }); }
+  function api(path) {
+    var f = null, m;
+    if (path.indexOf("getLive") === 0) f = "getLive.json";
+    else if ((m = path.match(/^getSchedule\?.*leagueId=(\d+)/))) f = "getSchedule-" + m[1] + ".json";
+    else if ((m = path.match(/^getEventDetails\?.*id=(\d+)/))) f = "event-" + m[1] + ".json";
+    if (!f) return Promise.resolve(null);
+    /* 30초 버킷 캐시버스터 — raw CDN 5분 캐시 우회 + 요청 수 억제 */
+    return j(RELAY + f + "?ts=" + Math.floor(Date.now() / 30000));
+  }
   function floor10(d) {
     d = new Date(d.getTime());
     d.setUTCMilliseconds(0);
@@ -2848,7 +2857,7 @@
       return startReplayMatch(list[0].matchId, 1, opts, "최근 경기");
     }
     /* 여기까지 왔는데 목록이 비었다 = esports-api 자체가 응답하지 않는 상태 */
-    throw new Error("라이엇 경기 정보 API가 응답하지 않습니다 (요청 제한 또는 점검). 잠시 후 다시 시도해주세요.");
+    throw new Error("경기 정보 데이터에 연결하지 못했습니다. 잠시 후 다시 시도해주세요.");
   }
 
   /* ── 워치파티 다시보기: 싱크 1회로 "영상 위치 ↔ 방송 절대 시각" 매핑을 만들어
@@ -3189,7 +3198,7 @@
     return;
   }
   window.__lckovConsole = true;
-  console.log("[LCK 오버레이] 번들 0805-12:50 로드"); // ↻ 적용 여부 확인용
+  console.log("[LCK 오버레이] 번들 0805-13:24 로드"); // ↻ 적용 여부 확인용
   /* 확장 content script에서만 true — 자동 실행이므로 무관한 방송에는 오버레이를 띄우지 않는다 */
   var AUTO = !!(typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.id);
   /* 북마클릿(수동 실행)을 SOOP이 아닌 페이지에서 눌렀을 때는 한 번 확인 —
