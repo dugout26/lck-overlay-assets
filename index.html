@@ -2799,7 +2799,13 @@
     /* ── 라이브: 매치 단위 추적 + 타임시프트 대응 ── */
     {
       log(&quot;진행 중인 LCK·챌린저스 경기 탐색...&quot;);
-      var live = await findLiveMatch();
+      var live = null;
+      try {
+        live = await findLiveMatch();
+      } catch (e) {
+        /* esports-api 실패(403·네트워크 등)로 자동 감지가 죽지 않게 — 다시보기·제목 경로로 폴백 */
+        log(&quot;경기 정보 API 오류(&quot; + (e &amp;&amp; e.message ? e.message : e) + &quot;) — 대체 경로 시도&quot;);
+      }
       if (live &amp;&amp; auto &amp;&amp; !isWatchingLive(live)) {
         log(&quot;라이브(&quot; + live.title + &quot;) 진행 중이지만 이 방송과 무관 → 오버레이 대기&quot;);
         return null;
@@ -2946,8 +2952,8 @@
       log(&quot;제목 인식 실패 → 최근 경기 재생 (오버레이 톱니 → 경기 선택에서 변경 가능)&quot;);
       return startReplayMatch(list[0].matchId, 1, opts, &quot;최근 경기&quot;);
     }
-    log(&quot;경기를 찾지 못했습니다&quot;);
-    return null;
+    /* 여기까지 왔는데 목록이 비었다 = esports-api 자체가 응답하지 않는 상태 */
+    throw new Error(&quot;라이엇 경기 정보 API가 응답하지 않습니다 (요청 제한 또는 점검). 잠시 후 다시 시도해주세요.&quot;);
   }
 
   /* ── 워치파티 다시보기: 싱크 1회로 &quot;영상 위치 ↔ 방송 절대 시각&quot; 매핑을 만들어
@@ -3288,7 +3294,7 @@
     return;
   }
   window.__lckovConsole = true;
-  console.log(&quot;[LCK 오버레이] 번들 0805-10:47 로드&quot;); // ↻ 적용 여부 확인용
+  console.log(&quot;[LCK 오버레이] 번들 0805-12:50 로드&quot;); // ↻ 적용 여부 확인용
   /* 확장 content script에서만 true — 자동 실행이므로 무관한 방송에는 오버레이를 띄우지 않는다 */
   var AUTO = !!(typeof chrome !== &quot;undefined&quot; &amp;&amp; chrome.runtime &amp;&amp; chrome.runtime.id);
   /* 북마클릿(수동 실행)을 SOOP이 아닌 페이지에서 눌렀을 때는 한 번 확인 —
@@ -3448,7 +3454,14 @@
       })
       .catch(function (e) {
         console.log(&quot;[LCK 오버레이] 시작 실패: &quot; + e.message);
-        if (AUTO &amp;&amp; !sel) setTimeout(boot, 120000);
+        if (AUTO) {
+          if (!sel) setTimeout(boot, 120000);
+        } else {
+          /* 북마클릿(수동 실행)은 절대 조용히 죽지 않는다 — 알리고 재클릭 가능하게 원복 */
+          window.__lckovConsole = false;
+          try { host.remove(); } catch (e2) {}
+          alert(&quot;[LCK 룬 오버레이] 시작 실패 — &quot; + (e &amp;&amp; e.message ? e.message : e));
+        }
       });
   }
   function restart() {
