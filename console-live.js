@@ -2612,6 +2612,28 @@
     return team.participants.reduce(function (a, p) { return a + p.totalGold; }, 0);
   }
 
+  /* 세트 중간 합류 시 골드 그래프 소급 채우기 — 시작부터 합류 시점까지 ~90초 간격 샘플.
+     실시간 폴링과 같은 배열을 공유하므로 끝나면 시간순 정렬로 마무리 */
+  async function backfillGold(gameId, gameStart, untilMs, hist) {
+    try {
+      var frameToPoint = function (f) {
+        return { t: Math.max(0, Math.round((new Date(f.rfc460Timestamp) - gameStart) / 1000)),
+                 b: teamGold(f.blueTeam), r: teamGold(f.redTeam),
+                 bk: f.blueTeam.totalKills || 0, rk: f.redTeam.totalKills || 0,
+                 bd: (f.blueTeam.dragons || []).length, rd: (f.redTeam.dragons || []).length,
+                 bb: f.blueTeam.barons || 0, rb: f.redTeam.barons || 0 };
+      };
+      for (var t = gameStart.getTime() + 60000; t < untilMs - 30000; t += 90000) {
+        var w = await jOr(FEED + "/window/" + gameId + "?startingTime=" + iso(floor10(new Date(t))));
+        if (!w || !w.frames || !w.frames.length) continue;
+        var p = frameToPoint(w.frames[w.frames.length - 1]);
+        var dup = hist.some(function (x) { return Math.abs(x.t - p.t) < 25; });
+        if (!dup) hist.push(p);
+      }
+      hist.sort(function (a, b) { return a.t - b.t; });
+    } catch (e) {}
+  }
+
   function buildState(win, det, dd, meta) {
     var md = win.gameMetadata;
     var wf = win.frames[win.frames.length - 1];
@@ -2786,6 +2808,11 @@
             curId = sel.gid; curNum = sel.e.number; curStart = sel.e.start;
             if (!histories[curId]) histories[curId] = [];
             log((behind > 8 ? "타임시프트 −" + Math.round(behind) + "초 → " : "") + curNum + "세트 추적");
+            /* 세트 중간 합류: 골드 그래프를 세트 시작부터 소급해서 채운다 (백그라운드, 완료되는 대로 그래프에 반영) */
+            if (!histories[curId].length && eff.getTime() - sel.e.start.getTime() > 150000) {
+              log("골드 그래프 소급 로딩 중...");
+              backfillGold(curId, sel.e.start, Math.min(eff.getTime(), Date.now()), histories[curId]);
+            }
           }
           var target = eff;
           if (sel.e.end && target > sel.e.end) target = sel.e.end;       // 종료된 세트면 마지막 장면 유지
@@ -3245,7 +3272,7 @@
     return;
   }
   window.__lckovConsole = true;
-  console.log("[LCK 오버레이] 번들 0805-15:27 로드"); // ↻ 적용 여부 확인용
+  console.log("[LCK 오버레이] 번들 0805-15:47 로드"); // ↻ 적용 여부 확인용
   /* 확장 content script에서만 true — 자동 실행이므로 무관한 방송에는 오버레이를 띄우지 않는다 */
   var AUTO = !!(typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.id);
   /* 방송 소스 모드(OBS 브라우저 소스·크로마키 캡처용 단독 페이지): SOOP 페이지가 아니어도

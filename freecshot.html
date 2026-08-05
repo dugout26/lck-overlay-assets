@@ -13,7 +13,11 @@
 window.__lckovSourceMode = true;
 (function () {
   var m = location.search.match(/[?&]bg=([^&]+)/);
-  if (m) document.body.style.background = "#" + decodeURIComponent(m[1]).replace(/^#/, "");
+  if (m) {
+    var v = decodeURIComponent(m[1]).replace(/^#/, "");
+    /* OBS 브라우저 소스는 진짜 투명 지원 — 크로마키 불필요, 색 잠식 없음 */
+    document.body.style.background = (v === "transparent" || v === "none") ? "transparent" : "#" + v;
+  }
   fetch("https://raw.githubusercontent.com/dugout26/lck-overlay-assets/main/console-live.js")
     .then(function (r) { return r.text(); })
     .then(function (t) { (0, eval)(t); })
