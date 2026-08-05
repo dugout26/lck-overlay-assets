@@ -72,6 +72,43 @@
     </table>
   </div>
 
+  <h2 class="alt">스트리머용 — 방송 화면에 오버레이 띄우기</h2>
+  <div style="font-size:13px;line-height:1.9;color:#C9CDD6;margin-bottom:16px">
+    <p style="margin:6px 0">워치파티 방송 화면에 오버레이를 직접 송출하는 방법입니다.
+    채팅창·후원 알림처럼 <b>브라우저 창을 방송에 한 겹 얹는</b> 표준 방식이라 최초 1회만 설정하면
+    다음 방송부터는 자동입니다 (경기 없으면 투명 대기 → 경기 시작 시 자동 표시 → 세트 전환 자동).</p>
+    <p style="margin:10px 0 4px"><b style="color:#E8C36B">송출용 주소</b></p>
+    <div style="margin:0 0 10px;padding:9px 14px;border:1px solid rgba(232,195,107,0.35);border-radius:9px;background:rgba(232,195,107,0.05)">
+      <code>https://dugout26.github.io/lck-overlay-assets/freecshot.html</code>
+    </div>
+    <p style="margin:6px 0"><b style="color:#E8C36B">프릭샷2 (창 캡처 + 크로마키)</b></p>
+    <ol style="margin:0 0 12px 20px">
+      <li>크롬에서 위 주소를 엽니다 → 초록 배경 창이 뜹니다</li>
+      <li>프릭샷2 화면 구성에서 <b>창 캡처</b>로 그 크롬 창을 추가합니다</li>
+      <li><b>크로마키</b>를 켜고 초록색을 제거합니다 (아이콘 색이 갉히면 유사도를 낮추거나 주소 뒤에 <code>?bg=FF00FF</code>)</li>
+      <li>레이어 크기를 게임 중계 화면과 <b>1:1(16:9)</b>로 맞춥니다 — 선수 클릭 존이 자동으로 정렬됩니다</li>
+    </ol>
+    <p style="margin:6px 0"><b style="color:#E8C36B">OBS (브라우저 소스 — 크로마키 불필요)</b></p>
+    <ol style="margin:0 0 12px 20px">
+      <li>소스 추가 → <b>브라우저</b> → 주소 뒤에 <code>?bg=transparent</code>를 붙여 입력, 1920×1080</li>
+      <li>게임 화면 위에 꽉 차게 배치하면 끝 — 배경이 진짜 투명이라 색 손실이 없습니다</li>
+    </ol>
+    <p style="margin:10px 0 4px"><b style="color:#E8C36B">방송 중 조작</b> (기본은 방해금지 모드 — 방송에 아무것도 안 보이는 클린 상태)</p>
+    <table style="border-collapse:collapse;font-size:12.5px;margin-bottom:10px">
+      <tr><td style="padding:3px 14px 3px 0">선수 룬 보여주기</td><td>크롬 창에서 그 선수 위치 클릭 (마우스 올리면 이름 태그) · 재클릭으로 닫기</td></tr>
+      <tr><td style="padding:3px 14px 3px 0">전체 정보 패널</td><td><code>Alt + K</code> (방해금지 ↔ 패널 전환)</td></tr>
+      <tr><td style="padding:3px 14px 3px 0">잠깐 다 숨기기</td><td><code>Alt + L</code></td></tr>
+    </table>
+    <p style="font-size:11.5px;color:#566070;margin:4px 0 10px">클릭·단축키는 방송 화면이 아니라 <b>열어둔 크롬 창</b>에서 합니다 (창이 활성 상태여야 함).
+    OBS 브라우저 소스 방식은 소스 우클릭 → "상호작용" 창에서 조작하세요. 시청자에게는 결과(룬 팝업)만 보입니다.</p>
+    <p style="margin:6px 0"><b style="color:#E8C36B">주소 옵션</b> (조합 가능, 예: <code>?bg=transparent&amp;delay=-30</code>)</p>
+    <table style="border-collapse:collapse;font-size:12.5px">
+      <tr><td style="padding:3px 14px 3px 0"><code>?bg=transparent</code></td><td>배경 투명 (OBS 브라우저 소스용) · <code>?bg=FF00FF</code>처럼 색 지정도 가능</td></tr>
+      <tr><td style="padding:3px 14px 3px 0"><code>?delay=초</code></td><td>표시 시점 조정 (기본 0 = 가장 최신 데이터, 라이엇 공급 특성상 실경기 대비 ~30초)</td></tr>
+      <tr><td style="padding:3px 14px 3px 0"><code>?dnd=0</code></td><td>방해금지 대신 패널 모드로 시작</td></tr>
+    </table>
+  </div>
+
   <h2 class="alt">알려진 문제 (v0.2.7)</h2>
   <ul style="margin:6px 0 16px 20px;font-size:13px;line-height:1.9;color:#C9CDD6">
     <li><b>방해금지 모드의 클릭 존·팝업 크기가 실제 선수 바와 안 맞을 수 있음</b> — 설정 → "게임 화면 영역·선수 존 위치 맞추기"로 보정 가능. 크기가 이상하면 제보 부탁드립니다</li>
@@ -3381,7 +3418,7 @@
     return;
   }
   window.__lckovConsole = true;
-  console.log(&quot;[LCK 오버레이] 번들 0805-15:49 로드&quot;); // ↻ 적용 여부 확인용
+  console.log(&quot;[LCK 오버레이] 번들 0805-16:13 로드&quot;); // ↻ 적용 여부 확인용
   /* 확장 content script에서만 true — 자동 실행이므로 무관한 방송에는 오버레이를 띄우지 않는다 */
   var AUTO = !!(typeof chrome !== &quot;undefined&quot; &amp;&amp; chrome.runtime &amp;&amp; chrome.runtime.id);
   /* 방송 소스 모드(OBS 브라우저 소스·크로마키 캡처용 단독 페이지): SOOP 페이지가 아니어도
