@@ -29,6 +29,10 @@
   <p class="sub">라이엇 API가 브라우저 교차 출처 요청을 허용하고 SOOP에 CSP가 없어서, 스크립트 주입만으로 라이브 오버레이가 동작합니다.
   라이브 LCK·챌린저스 경기가 있으면 자동 감지하고, 없으면 최근 경기를 리플레이 모드(15분 지점부터 실시간 재생)로 보여줍니다.</p>
 
+  <h2 class="alt">먼저 보기 — 30초 데모</h2>
+  <video src="demo.mp4" controls muted playsinline preload="metadata"
+         style="width:100%;max-width:860px;border-radius:11px;border:1px solid rgba(255,255,255,0.12);margin:4px 0 20px;display:block"></video>
+
   <div class="bm">
     <h2>방법 1 — 북마클릿 (추천 · 최초 1분 설정, 이후엔 클릭 한 번)</h2>
     <ol style="margin:10px 0 0 20px;font-size:13.5px;line-height:2;color:#EDEFF3">
@@ -3284,7 +3288,7 @@
     return;
   }
   window.__lckovConsole = true;
-  console.log(&quot;[LCK 오버레이] 번들 0805-09:17 로드&quot;); // ↻ 적용 여부 확인용
+  console.log(&quot;[LCK 오버레이] 번들 0805-10:47 로드&quot;); // ↻ 적용 여부 확인용
   /* 확장 content script에서만 true — 자동 실행이므로 무관한 방송에는 오버레이를 띄우지 않는다 */
   var AUTO = !!(typeof chrome !== &quot;undefined&quot; &amp;&amp; chrome.runtime &amp;&amp; chrome.runtime.id);
   /* 북마클릿(수동 실행)을 SOOP이 아닌 페이지에서 눌렀을 때는 한 번 확인 —
