@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>LCK 오버레이 — 연결 진단</title>
+<style>
+  body { font-family: -apple-system, "Malgun Gothic", sans-serif; background: #14181f; color: #e8e8e8;
+         max-width: 560px; margin: 40px auto; padding: 0 16px; }
+  h1 { font-size: 20px; color: #E8C36B; }
+  .row { background: #1d232d; border-radius: 10px; padding: 14px 16px; margin: 10px 0; font-size: 15px;
+         display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+  .ok { color: #6BE89A; font-weight: 700; }
+  .bad { color: #E86B6B; font-weight: 700; }
+  .wait { color: #9aa4b2; }
+  #summary { margin-top: 18px; padding: 14px 16px; background: #262d3a; border-radius: 10px;
+             font-size: 14px; line-height: 1.6; user-select: all; }
+  small { color: #9aa4b2; display: block; margin-top: 24px; line-height: 1.5; }
+</style>
+</head>
+<body>
+<h1>LCK 룬 오버레이 — 연결 진단</h1>
+<div class="row"><span>경기 정보 API (esports-api)</span><span id="r1" class="wait">확인 중...</span></div>
+<div class="row"><span>실시간 데이터 피드 (feed)</span><span id="r2" class="wait">확인 중...</span></div>
+<div id="summary">진단 중...</div>
+<small>이 결과 줄을 그대로 복사해서 전달해 주세요. 이 페이지는 아무 정보도 수집하지 않으며, 브라우저에서 라이엇 공개 API 2곳에 요청을 1번씩 보내기만 합니다.</small>
+<script>
+(function () {
+  var KEY = "0TvQnueqKa5mxJntVWt0w4LpLfEkrV1Ta8rQBb9Z";
+  var out = { api: "?", feed: "?" };
+  function set(id, text, cls) {
+    var el = document.getElementById(id);
+    el.textContent = text;
+    el.className = cls;
+  }
+  function done() {
+    if (out.api === "?" || out.feed === "?") return;
+    document.getElementById("summary").textContent =
+      "진단 결과: 경기API=" + out.api + " / 피드=" + out.feed + " / " + new Date().toISOString();
+  }
+  fetch("https://esports-api.lolesports.com/persisted/gw/getLive?hl=ko-KR", { headers: { "x-api-key": KEY } })
+    .then(function (r) {
+      if (r.ok) { out.api = "정상(200)"; set("r1", "정상 (HTTP 200)", "ok"); }
+      else { out.api = "HTTP " + r.status; set("r1", "차단됨 (HTTP " + r.status + ")", "bad"); }
+      done();
+    })
+    .catch(function (e) {
+      out.api = "연결실패(" + e.message + ")";
+      set("r1", "연결 실패 (CORS/네트워크)", "bad");
+      done();
+    });
+  fetch("https://feed.lolesports.com/livestats/v1/window/110000000000000000")
+    .then(function (r) {
+      /* 404·204도 서버 도달은 된 것 — 피드는 살아있음 */
+      out.feed = "정상(HTTP " + r.status + ")";
+      set("r2", "정상 (서버 응답 " + r.status + ")", "ok");
+      done();
+    })
+    .catch(function (e) {
+      out.feed = "연결실패(" + e.message + ")";
+      set("r2", "연결 실패", "bad");
+      done();
+    });
+})();
+</script>
+</body>
+</html>
