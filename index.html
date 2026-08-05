@@ -68,6 +68,24 @@
     </table>
   </div>
 
+  <h2 class="alt">알려진 문제 (v0.2.7)</h2>
+  <ul style="margin:6px 0 16px 20px;font-size:13px;line-height:1.9;color:#C9CDD6">
+    <li>워치파티처럼 <b>게임 화면이 작게 표시될 때 방해금지 모드의 클릭 UI·팝업이 화면 대비 큼</b> — 존 위치는 설정 → "선수 존 위치 맞추기"로 보정 가능, 크기 자동 축소는 개발 중</li>
+    <li>워치파티 <b>시계 자동 인식이 리플레이 장면·저화질에서 일시적으로 끊길 수 있음</b> (자동 재탐색으로 복귀)</li>
+    <li>녹화본 리워치 파티는 시계 인식 실패 시 설정 → <b>게임 시간 수동 입력</b>이 필요할 수 있음</li>
+  </ul>
+
+  <h2 class="alt">제보하기</h2>
+  <div style="font-size:13px;line-height:1.9;color:#C9CDD6;margin-bottom:16px">
+    <p>버그 제보 · 원하는 기능 제안 · 사용 소감 모두 환영합니다.</p>
+    <ul style="margin:6px 0 0 20px">
+      <li><b>GitHub Issues</b> (계정 필요): <a href="https://github.com/dugout26/lck-overlay-assets/issues/new" style="color:#E8C36B">이슈 등록하기</a> — 제목에 [버그]/[기능제안]/[피드백]을 붙여주세요</li>
+      <li><b>이메일</b>: <a href="mailto:dugout26.gm@gmail.com?subject=%5BLCK%20%EC%98%A4%EB%B2%84%EB%A0%88%EC%9D%B4%5D%20%EC%A0%9C%EB%B3%B4" style="color:#E8C36B">dugout26.gm@gmail.com</a></li>
+      <li><b>익명 설문</b>: 준비 중 (곧 링크가 여기에 추가됩니다)</li>
+    </ul>
+    <p style="font-size:11.5px;color:#566070;margin-top:8px">제보 시 함께 적어주시면 좋은 것: 어떤 방송에서(라이브/다시보기/워치파티), 무슨 동작을 했는지, 스크린샷</p>
+  </div>
+
   <h2 class="alt">방법 2 — 콘솔 붙여넣기</h2>
   <ol>
     <li>SOOP에서 아무 방송이나 엽니다 (경기 중계면 최고, 아니어도 리플레이 모드로 동작)</li>
@@ -3256,7 +3274,7 @@
     return;
   }
   window.__lckovConsole = true;
-  console.log(&quot;[LCK 오버레이] 번들 0805-09:02 로드&quot;); // ↻ 적용 여부 확인용
+  console.log(&quot;[LCK 오버레이] 번들 0805-09:05 로드&quot;); // ↻ 적용 여부 확인용
   /* 확장 content script에서만 true — 자동 실행이므로 무관한 방송에는 오버레이를 띄우지 않는다 */
   var AUTO = !!(typeof chrome !== &quot;undefined&quot; &amp;&amp; chrome.runtime &amp;&amp; chrome.runtime.id);
   /* 북마클릿(수동 실행)을 SOOP이 아닌 페이지에서 눌렀을 때는 한 번 확인 —
