@@ -74,6 +74,12 @@
     <li>워치파티 <b>시계 자동 인식이 리플레이 장면·저화질에서 일시적으로 끊길 수 있음</b> (자동 재탐색으로 복귀)</li>
     <li>녹화본 리워치 파티는 시계 인식 실패 시 설정 → <b>게임 시간 수동 입력</b>이 필요할 수 있음</li>
   </ul>
+  <div style="margin:0 0 16px;padding:12px 16px;border:1px solid rgba(232,195,107,0.35);border-radius:9px;background:rgba(232,195,107,0.05);font-size:13px;line-height:1.9;color:#C9CDD6">
+    <b style="color:#E8C36B">다시보기·워치파티 시청 팁 — 시간 맞추기</b><br>
+    시계 자동 인식이 안 붙으면: <b>게임이 진행 중인 구간에서</b>(밴픽·대기 화면 X) 화면 속 게임 시계를 보고
+    설정(톱니) → <b>게임 시간</b>에 <b>정확히 1회 입력</b>하세요 (예: <code>15:45</code>).
+    그 세트 안에서는 이후 <b>실시간 재생·시킹 모두 자동으로 따라갑니다.</b> 세트가 바뀌면 한 번만 다시 입력하면 됩니다.
+  </div>
 
   <h2 class="alt">제보하기</h2>
   <div style="font-size:13px;line-height:1.9;color:#C9CDD6;margin-bottom:16px">
@@ -3274,7 +3280,7 @@
     return;
   }
   window.__lckovConsole = true;
-  console.log(&quot;[LCK 오버레이] 번들 0805-09:05 로드&quot;); // ↻ 적용 여부 확인용
+  console.log(&quot;[LCK 오버레이] 번들 0805-09:06 로드&quot;); // ↻ 적용 여부 확인용
   /* 확장 content script에서만 true — 자동 실행이므로 무관한 방송에는 오버레이를 띄우지 않는다 */
   var AUTO = !!(typeof chrome !== &quot;undefined&quot; &amp;&amp; chrome.runtime &amp;&amp; chrome.runtime.id);
   /* 북마클릿(수동 실행)을 SOOP이 아닌 페이지에서 눌렀을 때는 한 번 확인 —
