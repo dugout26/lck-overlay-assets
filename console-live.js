@@ -2727,7 +2727,7 @@
         /* esports-api 실패(403·네트워크 등)로 자동 감지가 죽지 않게 — 다시보기·제목 경로로 폴백 */
         log("경기 정보 API 오류(" + (e && e.message ? e.message : e) + ") — 대체 경로 시도");
       }
-      if (live && auto && !isWatchingLive(live)) {
+      if (live && auto && !opts.sourceAlways && !isWatchingLive(live)) {
         log("라이브(" + live.title + ") 진행 중이지만 이 방송과 무관 → 오버레이 대기");
         return null;
       }
@@ -3235,13 +3235,23 @@
     return;
   }
   window.__lckovConsole = true;
-  console.log("[LCK 오버레이] 번들 0805-14:45 로드"); // ↻ 적용 여부 확인용
+  console.log("[LCK 오버레이] 번들 0805-15:13 로드"); // ↻ 적용 여부 확인용
   /* 확장 content script에서만 true — 자동 실행이므로 무관한 방송에는 오버레이를 띄우지 않는다 */
   var AUTO = !!(typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.id);
+  /* 방송 소스 모드(OBS 브라우저 소스·크로마키 캡처용 단독 페이지): SOOP 페이지가 아니어도
+     라이브를 추적하고, 라이브가 없으면 조용히 대기 — 송출 화면에 리플레이·알림창을 띄우지 않는다 */
+  var SOURCE = !!window.__lckovSourceMode;
+  var QS = {};
+  try {
+    location.search.replace(/[?&]([^=&]+)=([^&]*)/g, function (_, k, v) { QS[k] = decodeURIComponent(v); return _; });
+  } catch (e) {}
+  if (SOURCE && QS.delay && !localStorage.getItem("lckov.delay")) {
+    try { localStorage.setItem("lckov.delay", String(parseInt(QS.delay, 10) || -60)); } catch (e) {}
+  }
   /* 북마클릿(수동 실행)을 SOOP이 아닌 페이지에서 눌렀을 때는 한 번 확인 —
      리플레이 폴백이 무관한 페이지에 뜨는 것 방지 */
   var SOOP_PAGE = /(^|\.)(sooplive\.(co\.kr|com)|afreecatv\.com)$/.test(location.hostname);
-  if (!AUTO && !SOOP_PAGE) {
+  if (!AUTO && !SOURCE && !SOOP_PAGE) {
     if (!window.confirm("SOOP 페이지가 아닙니다. 테스트용으로 여기에 오버레이를 띄울까요?")) {
       window.__lckovConsole = false;
       return;
@@ -3387,20 +3397,23 @@
     restart();
   }
   function boot() {
-    LCKLive.start({ auto: AUTO, matchId: sel && sel.matchId, liveMatchId: sel && sel.liveMatchId, setNumber: sel && sel.setNumber, onState: onState, onPregame: onPregame, onSetHint: onSetHint })
+    LCKLive.start({ auto: AUTO || SOURCE, sourceAlways: SOURCE,
+                    matchId: sel && sel.matchId,
+                    liveMatchId: (sel && sel.liveMatchId) || (SOURCE && QS.match) || undefined,
+                    setNumber: sel && sel.setNumber, onState: onState, onPregame: onPregame, onSetHint: onSetHint })
       .then(function (h) {
         if (h) {
           handle = h;
           window.__lckovStop = h.stop;
           console.log("[LCK 오버레이] 실행 중 — 중지하려면 window.__lckovStop()");
-        } else if (AUTO && !sel) {
+        } else if ((AUTO || SOURCE) && !sel) {
           /* 자동 모드: 아직 관련 방송 아님 — 경기 시작·제목 변경 대비 2분마다 재확인 */
           setTimeout(boot, 120000);
         }
       })
       .catch(function (e) {
         console.log("[LCK 오버레이] 시작 실패: " + e.message);
-        if (AUTO) {
+        if (AUTO || SOURCE) {
           if (!sel) setTimeout(boot, 120000);
         } else {
           /* 북마클릿(수동 실행)은 절대 조용히 죽지 않는다 — 알리고 재클릭 가능하게 원복 */
