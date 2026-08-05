@@ -683,7 +683,7 @@
     hdr.appendChild(meta);
     /* 시계 옆 새로고침 — 자리를 비웠다 오면 딜레이가 크게 틀어질 수 있어(방송 버퍼링·타임시프트)
        한 번 눌러 최신 시점으로 되돌린다 (테스터 제보 반영) */
-    var resyncBtn = iconBtn('sync', '지금 시점으로 새로고침 (딜레이 초기화)');
+    var resyncBtn = iconBtn('sync', '다시 동기화 (딜레이 설정은 유지)');
     if (opts.onResync) hdr.appendChild(resyncBtn);
     var gearBtn = iconBtn('gear', '설정');
     var closeBtn = iconBtn('x', '접기');
@@ -978,7 +978,7 @@
     }
     var store = { get: function (k, d) { try { var v = localStorage.getItem('lckov.' + k); return v == null ? d : Number(v); } catch (e) { return d; } },
                   set: function (k, v) { try { localStorage.setItem('lckov.' + k, String(v)); } catch (e) {} } };
-    var delay = store.get('delay', 30);
+    var delay = store.get('delay', -10);
     var alpha = store.get('alpha', 94);
     /* UI 크기: 기본은 화면 폭에 맞춰 자동(1920px 기준 100%) — 슬라이더를 만지면 수동 고정 */
     function autoScalePct() {
@@ -1119,7 +1119,7 @@
     drawer.appendChild(modeCtl);
 
     drawer.appendChild(scaleCtl);
-    drawer.appendChild(sliderCtl('딜레이 보정', -300, 30, 10, delay,
+    drawer.appendChild(sliderCtl('딜레이 보정 (0 = 가장 최신)', -180, 0, 5, Math.max(-180, Math.min(0, delay)),
       function (v) { return (v > 0 ? '+' : '') + v + '초'; },
       function (v) { store.set('delay', v); if (opts.onDelayChange) opts.onDelayChange(v); }));
     drawer.appendChild(alphaCtl);
@@ -1520,7 +1520,7 @@
     /* ── 동작 ── */
     resyncBtn.addEventListener('click', function () {
       resyncBtn.classList.add('spin');
-      notify({ text: '최신 시점으로 다시 맞추는 중...' });
+      notify({ text: '다시 동기화하는 중...' });
       opts.onResync();
     });
     gearBtn.addEventListener('click', function () { root.classList.toggle('settings'); });
@@ -2885,8 +2885,11 @@
             try { await refreshRanges(); } catch (e) { log("일정 갱신 실패: " + e.message); }
           }
           var behind = videoBehindLive();
-          var delay = Number(localStorage.getItem("lckov.delay") || 30);
-          var eff = new Date(nowMs - behind * 1000 + delay * 1000);
+          /* 딜레이는 "라이엇이 주는 가장 최신 데이터"를 0으로 놓고 재는 값이다.
+             0 = 가장 최신(≈25초 전), 음수 = 그만큼 더 과거. 방송이 데이터보다 느리면 음수로 맞춘다.
+             기본 -10: 대부분의 SOOP 방송이 조금 더 느려 오버레이가 앞서면 스포일러가 되므로 안전 여유 */
+          var delay = Number(localStorage.getItem("lckov.delay") || -10);
+          var eff = new Date(Math.min(nowMs - behind * 1000, nowMs - feedLag.window * 1000) + delay * 1000);
           var sel = pickGameAt(eff);
           if (!sel) { log("피드 대기 중 (밴픽이면 게임 시작 후 자동 감지)"); return; }
           if (sel.gid !== curId) {
@@ -2953,14 +2956,16 @@
             ocrLPrev = { time: ev.time, at: nowMs };
             if (!trusted || ev.conf < 0.8) return;
             var behind = videoBehindLive();
-            var newDelay = Math.round(((curStart.getTime() + ev.time * 1000) - (nowMs - behind * 1000)) / 1000);
+            /* 화면 속 시계가 가리키는 절대 시각 ↔ 우리가 쓸 수 있는 가장 최신 시점의 차이 = 필요한 딜레이 */
+            var baseMs = Math.min(nowMs - behind * 1000, nowMs - feedLag.window * 1000);
+            var newDelay = Math.round(((curStart.getTime() + ev.time * 1000) - baseMs) / 1000);
             /* 자리를 비운 사이 방송이 버퍼링되면 큰 음수(-200초 등)로 굳는 사례 제보 —
                라이브에서 5분 이상 뒤처진 값은 오인식으로 보고 버린다 (헤더 새로고침으로 복구 가능) */
-            if (newDelay < -300 || newDelay > 60) {
+            if (newDelay < -300 || newDelay > 15) {
               log("시계 인식값이 비정상(" + newDelay + "초) — 무시");
               return;
             }
-            var curDelay = Number(localStorage.getItem("lckov.delay") || 30);
+            var curDelay = Number(localStorage.getItem("lckov.delay") || -10);
             if (Math.abs(newDelay - curDelay) >= 3) {
               try { localStorage.setItem("lckov.delay", String(newDelay)); } catch (e) {}
               log("방송 시계 인식 → 딜레이 자동 보정 (" + newDelay + "초) — 오버레이가 방송 화면 시점과 일치합니다");
@@ -3374,7 +3379,7 @@
     return;
   }
   window.__lckovConsole = true;
-  console.log("[LCK 오버레이] 번들 0805-18:11 로드"); // ↻ 적용 여부 확인용
+  console.log("[LCK 오버레이] 번들 0805-18:17 로드"); // ↻ 적용 여부 확인용
   /* 확장 content script에서만 true — 자동 실행이므로 무관한 방송에는 오버레이를 띄우지 않는다 */
   var AUTO = !!(typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.id);
   /* 방송 소스 모드(OBS 브라우저 소스·크로마키 캡처용 단독 페이지): SOOP 페이지가 아니어도
@@ -3384,9 +3389,22 @@
   try {
     location.search.replace(/[?&]([^=&]+)=([^&]*)/g, function (_, k, v) { QS[k] = decodeURIComponent(v); return _; });
   } catch (e) {}
+  /* 딜레이 기준점 변경(2026-08-05): 예전에는 "지금"이 0이라 -40처럼 큰 음수를 넣어야 맞았지만,
+     이제는 "라이엇이 주는 가장 최신 데이터"가 0이다. 저장된 옛 값을 새 기준으로 한 번 옮긴다. */
+  try {
+    if (localStorage.getItem("lckov.delayver") !== "2") {
+      var od = localStorage.getItem("lckov.delay");
+      if (od !== null) {
+        var nd = Math.max(-180, Math.min(0, Math.round(Number(od) + 30)));
+        localStorage.setItem("lckov.delay", String(nd));
+        console.log("[LCK 오버레이] 딜레이 기준 변경 — " + od + "초 → " + nd + "초 (0 = 가장 최신)");
+      }
+      localStorage.setItem("lckov.delayver", "2");
+    }
+  } catch (e) {}
   if (SOURCE) {
-    /* 송출용 기본 딜레이 0 — 스트리머가 방송에 얹는 순간이 기준이라 시청자용 보수값(-60)을 쓰지 않는다.
-       ?delay= 파라미터는 항상 우선 적용 */
+    /* 송출용 기본 딜레이 0 = 가장 최신 데이터 — 스트리머 화면이 기준이라 여유를 두지 않는다.
+       ?delay=-10 처럼 음수를 주면 그만큼 과거로 늦출 수 있다 */
     try {
       if (QS.delay) localStorage.setItem("lckov.delay", String(parseInt(QS.delay, 10) || 0));
       else if (localStorage.getItem("lckov.delay") === null) localStorage.setItem("lckov.delay", "0");
@@ -3597,13 +3615,19 @@
   /* 헤더 새로고침: 딜레이를 기본(최신)으로 되돌리고 즉시 다시 붙는다.
      자리를 비운 사이 방송이 버퍼링·타임시프트되면 시계 인식이 큰 음수로 굳는 경우가 있다 */
   function resync() {
+    /* 사용자가 맞춰둔 딜레이는 건드리지 않는다 — 값이 망가진 경우(자리 비운 사이 오인식)만 되돌린다 */
+    var msg = "다시 동기화";
     try {
-      localStorage.setItem("lckov.delay", "30");
+      var d = Number(localStorage.getItem("lckov.delay"));
+      if (!isFinite(d) || d < -180 || d > 0) {
+        localStorage.setItem("lckov.delay", SOURCE ? "0" : "-10");
+        msg = "딜레이 값이 비정상(" + d + "초)이라 기본값으로 되돌리고 다시 동기화";
+      }
       /* 다시보기라면 저장된 영상 싱크도 버려 새로 잡는다 (틀어진 싱크가 계속 재사용되는 것 방지) */
       var vm = location.pathname.match(/\/player\/(\d+)/);
       if (vm) localStorage.removeItem("lckov.vodepoch." + vm[1]);
     } catch (e) {}
-    console.log("[LCK 오버레이] 새로고침 — 딜레이 초기화 후 재동기");
+    console.log("[LCK 오버레이] 새로고침 — " + msg);
     restart();
   }
   /* 경기 선택 드롭다운: 다시보기 페이지에서는 시즌 전체, 그 외에는 라이브 + 최근 12일 */
