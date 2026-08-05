@@ -1,0 +1,20 @@
+name: api-probe
+on: workflow_dispatch
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: probe esports-api from GitHub egress
+        run: |
+          KEY="0TvQnueqKa5mxJntVWt0w4LpLfEkrV1Ta8rQBb9Z"
+          URL="https://esports-api.lolesports.com/persisted/gw/getLive?hl=ko-KR"
+          echo "egress-ip: $(curl -s https://api.ipify.org)"
+          echo "plain: $(curl -s -o /dev/null -w '%{http_code}' "$URL" -H "x-api-key: $KEY")"
+          echo "browser-headers: $(curl -s -o /dev/null -w '%{http_code}' "$URL" \
+            -H "x-api-key: $KEY" \
+            -H 'User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36' \
+            -H 'Origin: https://lolesports.com' -H 'Referer: https://lolesports.com/')"
+          echo "schedule: $(curl -s -o /dev/null -w '%{http_code}' 'https://esports-api.lolesports.com/persisted/gw/getSchedule?hl=ko-KR&leagueId=98767991310872058' -H "x-api-key: $KEY")"
+          echo "feed: $(curl -s -o /dev/null -w '%{http_code}' 'https://feed.lolesports.com/livestats/v1/window/110000000000000000')"
+          BODY=$(curl -s --max-time 15 "$URL" -H "x-api-key: $KEY" | head -c 200)
+          echo "body-sample: $BODY"
