@@ -2624,6 +2624,8 @@
                  bb: f.blueTeam.barons || 0, rb: f.redTeam.barons || 0 };
       };
       for (var t = gameStart.getTime() + 60000; t < untilMs - 30000; t += 90000) {
+        /* 한 번에 몰아치지 않도록 간격을 둔다 — 접속 직후 소급이라 급할 이유가 없다 */
+        await new Promise(function (r) { setTimeout(r, 400); });
         var w = await jOr(FEED + "/window/" + gameId + "?startingTime=" + iso(floor10(new Date(t))));
         if (!w || !w.frames || !w.frames.length) continue;
         var p = frameToPoint(w.frames[w.frames.length - 1]);
@@ -2784,6 +2786,7 @@
         var histories = {}; // gameId → goldHistory (세트별 분리)
         var curId = null, curNum = 1, curStart = null;
         var lastRefresh = 0;
+        var lastBucket = 0; // 마지막으로 가져온 10초 구간 — 같은 구간을 다시 요청하지 않기 위함
 
         async function refreshRanges() {
           var det = await api("getEventDetails?hl=ko-KR&id=" + live.matchId);
@@ -2818,7 +2821,14 @@
           return best;
         }
 
+        var ticking = false;
         async function liveTick() {
+          /* 3초 간격 확인이라 이전 틱이 아직 응답을 기다리는 중일 수 있다 — 겹치면 같은 요청이 두 번 나간다 */
+          if (ticking) return;
+          ticking = true;
+          try { return await liveTickInner(); } finally { ticking = false; }
+        }
+        async function liveTickInner() {
           var nowMs = Date.now();
           if (nowMs - lastRefresh > 60000) {
             lastRefresh = nowMs;
@@ -2831,6 +2841,7 @@
           if (!sel) { log("피드 대기 중 (밴픽이면 게임 시작 후 자동 감지)"); return; }
           if (sel.gid !== curId) {
             curId = sel.gid; curNum = sel.e.number; curStart = sel.e.start;
+            lastBucket = 0; // 세트가 바뀌면 즉시 새로 받는다
             if (!histories[curId]) histories[curId] = [];
             log((behind > 8 ? "타임시프트 −" + Math.round(behind) + "초 → " : "") + curNum + "세트 추적");
             /* 세트 중간 합류: 골드 그래프를 세트 시작부터 소급해서 채운다 (백그라운드, 완료되는 대로 그래프에 반영) */
@@ -2845,7 +2856,14 @@
           if (target < minT) target = minT;                               // 피드 시작 직전 204 방지
           /* 피드는 실제 경기보다 늦게 공급된다 — 얼마나 늦는지는 fetchNewest가 실측으로 학습하므로
              여기서는 목표만 넘기고, 공급 한계로 당기는 일은 fetchNewest에 맡긴다 */
+          /* 라이엇은 10초 단위 구간으로만 새 데이터를 연다 — 아직 같은 구간이면 요청을 건너뛴다.
+             덕분에 자주 확인해도(3초) 실제 요청 수는 10초에 1번 그대로이고,
+             새 구간이 열리는 순간을 놓치지 않아 최대 10초씩 밀리던 지연이 사라진다 */
+          var wantMs = Math.min(target.getTime(), nowMs - feedLag.window * 1000);
+          var bucket = Math.floor(wantMs / 10000);
+          if (bucket === lastBucket) return;
           var st = await fetchAndEmit(curId, curNum, curStart, target, histories[curId], opts, true);
+          if (st) lastBucket = bucket; // 실패한 구간은 다음 틱에 다시 시도
           /* 라이엇 이벤트 상태 갱신이 늦어도(2026-08 실측) 피드의 finished 신호로 세트 종료를 직접 판정
              — 시계를 실제 종료 시각에 고정하고, 다음 세트가 시작되면 refreshRanges가 자동 전환 */
           if (st && st.gameState === "finished" && !sel.e.end) {
@@ -2897,7 +2915,8 @@
         await refreshRanges();
         lastRefresh = Date.now();
         await liveTick();
-        timer = setInterval(function () { liveTick().catch(function (e) { log("폴링 오류: " + e.message); }); }, 10000);
+        /* 3초마다 확인하되 새 구간이 없으면 요청하지 않는다 — 네트워크 요청은 10초에 1회 수준 유지 */
+        timer = setInterval(function () { liveTick().catch(function (e) { log("폴링 오류: " + e.message); }); }, 3000);
         return { stop: function () { clearInterval(timer); if (ocrL) ocrL.stop(); }, live: true, matchId: live.matchId, title: live.title };
       }
       log("라이브 경기 없음");
@@ -3299,7 +3318,7 @@
     return;
   }
   window.__lckovConsole = true;
-  console.log("[LCK 오버레이] 번들 0805-17:21 로드"); // ↻ 적용 여부 확인용
+  console.log("[LCK 오버레이] 번들 0805-17:34 로드"); // ↻ 적용 여부 확인용
   /* 확장 content script에서만 true — 자동 실행이므로 무관한 방송에는 오버레이를 띄우지 않는다 */
   var AUTO = !!(typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.id);
   /* 방송 소스 모드(OBS 브라우저 소스·크로마키 캡처용 단독 페이지): SOOP 페이지가 아니어도
