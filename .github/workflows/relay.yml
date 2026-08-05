@@ -1,0 +1,47 @@
+name: relay
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "once | loop"
+        default: "once"
+  schedule:
+    - cron: "40 7 * * *"   # 16:40 KST — 방송 전 루프 시작
+    - cron: "20 13 * * *"  # 22:20 KST — 늦게 끝나는 날 연장 (concurrency로 대기 후 이어받음)
+permissions:
+  contents: write
+concurrency:
+  group: relay
+  cancel-in-progress: false
+jobs:
+  relay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+      - name: relay
+        env:
+          MODE: ${{ github.event.inputs.mode || 'loop' }}
+        run: |
+          publish() {
+            rm -rf out/.git
+            git -C out init -q -b data
+            git -C out add -A
+            git -C out -c user.name=relay -c user.email=relay@users.noreply.github.com commit -qm "relay tick"
+            git -C out push -qf "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" data:data
+          }
+          if [ "$MODE" = "once" ]; then
+            python3 tools/relay.py out && publish
+            exit 0
+          fi
+          END=$(( $(date +%s) + 340*60 ))
+          while [ $(date +%s) -lt $END ]; do
+            T0=$(date +%s)
+            if python3 tools/relay.py out; then
+              publish || echo "푸시 실패 — 다음 틱에 재시도"
+            else
+              echo "생성 실패 — 다음 틱에 재시도"
+            fi
+            SLEEP=$(( 60 - ( $(date +%s) - T0 ) ))
+            [ $SLEEP -gt 0 ] && sleep $SLEEP || true
+          done
