@@ -83,17 +83,52 @@ def map_event(ev):
     }
 
 
-def feed_started(game_id):
-    """livestats 피드에 프레임이 있으면 그 세트는 실제로 시작된 것"""
+def feed_window(game_id, starting=None):
     try:
-        req = urllib.request.Request("https://feed.lolesports.com/livestats/v1/window/" + str(game_id))
+        url = "https://feed.lolesports.com/livestats/v1/window/" + str(game_id)
+        if starting:
+            url += "?startingTime=" + starting
+        req = urllib.request.Request(url)
         with urllib.request.urlopen(req, timeout=10) as r:
             if r.status != 200:
-                return False
+                return None
             body = r.read()
-        return bool(body) and bool(json.loads(body).get("frames"))
+        return json.loads(body) if body else None
     except Exception:
-        return False
+        return None
+
+
+def feed_started(game_id):
+    """livestats 피드에 프레임이 있으면 그 세트는 실제로 시작된 것"""
+    w = feed_window(game_id)
+    return bool(w and w.get("frames"))
+
+
+def game_finished_ago(game_id, now):
+    """세트의 마지막 프레임이 finished면 (True, 종료 후 경과분) — 아니면 (False, 0)"""
+    w0 = feed_window(game_id)
+    frames0 = (w0 or {}).get("frames") or []
+    if not frames0:
+        return False, 0
+    try:
+        st = datetime.strptime(frames0[0]["rfc460Timestamp"][:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
+    except (ValueError, KeyError):
+        return False, 0
+    probe = min(st + timedelta(hours=2), now - timedelta(minutes=1))
+    probe = probe.replace(microsecond=0)
+    probe = probe.replace(second=probe.second - probe.second % 10)
+    w = feed_window(game_id, probe.strftime("%Y-%m-%dT%H:%M:%S.000Z"))
+    frames = (w or {}).get("frames") or []
+    if not frames:
+        return False, 0
+    lf = frames[-1]
+    if lf.get("gameState") != "finished":
+        return False, 0
+    try:
+        end = datetime.strptime(lf["rfc460Timestamp"][:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
+    except (ValueError, KeyError):
+        return True, 0
+    return True, (now - end).total_seconds() / 60
 
 
 def probe_live(sched_events, now):
@@ -111,6 +146,11 @@ def probe_live(sched_events, now):
             continue
         started = [g for g in e["_games"] if feed_started(g.get("id"))]
         if not started:
+            continue
+        # 마지막 세트가 끝난 지 40분 넘었으면 매치 종료로 간주 — gql이 완료 처리를 안 해줘
+        # 끝난 경기가 라이브 목록에 유령처럼 남는 문제 방지 (세트 간 휴식은 보통 10~15분)
+        fin, ago = game_finished_ago(started[-1].get("id"), now)
+        if fin and ago > 40:
             continue
         e["state"] = "inProgress"
         last = started[-1]
