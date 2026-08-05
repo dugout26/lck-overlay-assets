@@ -16,6 +16,6 @@
 
 ## 문의
 
-GitHub 저장소 이슈로 문의해 주세요: https://github.com/dugout26/lck-overlay-assets/issues
+이메일로 문의해 주세요: dugout26.gm@gmail.com
 
 이 확장은 비공식 무료 팬 프로젝트이며 Riot Games 및 SOOP과 무관합니다.
