@@ -30,18 +30,19 @@
   라이브 LCK·챌린저스 경기가 있으면 자동 감지하고, 없으면 최근 경기를 리플레이 모드(15분 지점부터 실시간 재생)로 보여줍니다.</p>
 
   <div class="bm">
-    <h2>방법 1 — 북마클릿 (추천: 클릭 한 번, 항상 최신 버전)</h2>
-    <p><b>이 페이지에서는 등록만 하세요</b> — 아래 버튼을 <b>북마크바로 드래그</b>해서 등록해두고,
-    <b>SOOP 탭으로 이동한 뒤</b>(라이브·다시보기 모두 가능) 거기서 북마크를 클릭하면 그 화면 위에 오버레이가 뜹니다.
-    북마클릿은 "지금 보고 있는 탭"에서만 동작합니다. 클릭할 때마다 최신 번들을 받아오므로 업데이트는 자동입니다.</p>
-    <a class="bmlink" id="bmlink" href="javascript:(function(){fetch('https://raw.githubusercontent.com/dugout26/lck-overlay-assets/main/console-live.js').then(function(r){return r.text()}).then(function(t){(0,eval)(t)}).catch(function(e){alert('LCK 오버레이 로드 실패: '+e)})})()">⚡ LCK 룬 오버레이 ← 이 버튼을 북마크바로 드래그</a>
-    <div id="dragtip" style="display:none;margin-top:10px;padding:12px 16px;border:1px solid #FF6B6B;border-radius:9px;background:rgba(255,107,107,0.08);color:#FFB4B4;font-size:13px;line-height:1.7">
-      여기서 클릭하는 게 아니라 <b>마우스로 꾹 잡고 브라우저 상단 북마크바에 끌어다 놓는</b> 겁니다.<br>
-      북마크바가 안 보이면 <b>⌘⇧B</b> (윈도우: <b>Ctrl+Shift+B</b>)로 켜세요.
-      등록 후 <b>SOOP 탭에서</b> 그 북마크를 클릭하면 오버레이가 뜹니다.
-    </div>
-    <p style="font-size:11px;color:#566070">드래그가 안 되면: 북마크를 직접 추가하고 주소 칸에 아래 '북마클릿 복사' 내용을 붙여넣으세요.</p>
-    <button class="btn" id="copybm" style="padding:8px 16px;font-size:12px">북마클릿 복사</button><span class="ok" id="okbm">복사됨!</span>
+    <h2>방법 1 — 북마클릿 (추천 · 최초 1분 설정, 이후엔 클릭 한 번)</h2>
+    <ol style="margin:10px 0 0 20px;font-size:13.5px;line-height:2;color:#EDEFF3">
+      <li><b>코드 복사</b> — 아래 버튼을 누르세요.<br>
+        <button class="btn" id="copybm" style="padding:9px 18px;font-size:13px;margin:8px 0">북마클릿 복사</button><span class="ok" id="okbm">복사됨!</span></li>
+      <li><b>북마크로 등록</b> (최초 1회)<br>
+        <span style="color:#C9CDD6">① 북마크바가 안 보이면 <code>⌘⇧B</code> (윈도우 <code>Ctrl+Shift+B</code>)로 켜기<br>
+        ② 북마크바 빈 곳에 <b>마우스 우클릭 → "페이지 추가"</b> (또는 북마크 관리자에서 "새 북마크 추가")<br>
+        ③ 이름: <code>LCK 룬 오버레이</code> / <b>URL 칸에 방금 복사한 코드 붙여넣기</b> → 저장</span></li>
+      <li><b>사용하기</b> — <b>SOOP에서 경기 화면을 연 상태에서</b> 방금 만든 북마크를 클릭<br>
+        <span style="color:#C9CDD6">· 라이브 중계 → 경기 자동 감지 · 공식 다시보기 → 시간 자동 싱크 · 워치파티 → 시계 자동 인식<br>
+        · 끄기: 페이지 새로고침 (또는 오버레이의 × / 단축키 Alt+L)<br>
+        · 항상 최신 버전이 실행되므로 업데이트는 신경 쓸 필요 없음</span></li>
+    </ol>
   </div>
 
   <h2 class="alt">방법 2 — 콘솔 붙여넣기</h2>
@@ -3232,7 +3233,7 @@
     return;
   }
   window.__lckovConsole = true;
-  console.log(&quot;[LCK 오버레이] 번들 0805-08:57 로드&quot;); // ↻ 적용 여부 확인용
+  console.log(&quot;[LCK 오버레이] 번들 0805-09:00 로드&quot;); // ↻ 적용 여부 확인용
   /* 확장 content script에서만 true — 자동 실행이므로 무관한 방송에는 오버레이를 띄우지 않는다 */
   var AUTO = !!(typeof chrome !== &quot;undefined&quot; &amp;&amp; chrome.runtime &amp;&amp; chrome.runtime.id);
   /* 북마클릿(수동 실행)을 SOOP이 아닌 페이지에서 눌렀을 때는 한 번 확인 —
@@ -3422,14 +3423,8 @@
       } else { done(); }
     });
   }
-  /* 안내 페이지에서의 클릭은 실행 대신 드래그 안내 표시 (드래그는 그대로 동작) */
-  document.getElementById('bmlink').addEventListener('click', function (e) {
-    e.preventDefault();
-    document.getElementById('dragtip').style.display = 'block';
-  });
+  var BOOKMARKLET = "javascript:(function(){fetch('https://raw.githubusercontent.com/dugout26/lck-overlay-assets/main/console-live.js').then(function(r){return r.text()}).then(function(t){(0,eval)(t)}).catch(function(e){alert('LCK 오버레이 로드 실패: '+e)})})()";
   var ta = document.getElementById('code');
   wireCopy('copy', 'ok', function () { ta.select(); return ta.value; });
-  wireCopy('copybm', 'okbm', function () {
-    return document.querySelector('.bmlink').getAttribute('href');
-  });
+  wireCopy('copybm', 'okbm', function () { return BOOKMARKLET; });
 </script>
