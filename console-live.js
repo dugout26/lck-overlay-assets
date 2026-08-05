@@ -53,6 +53,8 @@
     '  -webkit-font-smoothing: antialiased;',
     '}',
     '.root { --ui-scale: 1; }',
+    '@keyframes lckspin { to { transform: rotate(360deg); } }',
+    '.hbtn.spin svg { animation: lckspin 0.7s linear infinite; }',
     '.panel { transform: scale(var(--ui-scale)); transform-origin: top right; }',
     '.root.origin-left .panel { transform-origin: top left; }',
     '.panel {',
@@ -405,7 +407,8 @@
   }
   var ICONS = {
     gear: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
-    x: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M18 6 6 18M6 6l12 12"/></svg>'
+    x: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M18 6 6 18M6 6l12 12"/></svg>',
+    sync: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>'
   };
   function iconBtn(name, label) {
     var b = el('button', 'hbtn');
@@ -648,10 +651,14 @@
   function mount(host, state, opts) {
     opts = opts || {};
     var shadow = host.shadowRoot || host.attachShadow({ mode: 'open' });
-    shadow.textContent = '';
-    var style = document.createElement('style');
-    style.textContent = CSS;
-    shadow.appendChild(style);
+    /* 갱신 때마다 전부 지우고 다시 만들면 빈 프레임이 생겨 화면이 번쩍인다.
+       스타일은 그대로 두고 새 화면을 미리 만든 뒤 마지막에 한 번에 갈아끼운다(교체는 아래 swapIn). */
+    var prevRoot = shadow.querySelector('.root');
+    if (!shadow.querySelector('style')) {
+      var style = document.createElement('style');
+      style.textContent = CSS;
+      shadow.appendChild(style);
+    }
 
     var root = el('div', 'root');
     var panel = el('div', 'panel');
@@ -674,6 +681,10 @@
     var clock = el('span', 'clock', fmtClock(state.gameTimeSec));
     meta.appendChild(clock);
     hdr.appendChild(meta);
+    /* 시계 옆 새로고침 — 자리를 비웠다 오면 딜레이가 크게 틀어질 수 있어(방송 버퍼링·타임시프트)
+       한 번 눌러 최신 시점으로 되돌린다 (테스터 제보 반영) */
+    var resyncBtn = iconBtn('sync', '지금 시점으로 새로고침 (딜레이 초기화)');
+    if (opts.onResync) hdr.appendChild(resyncBtn);
     var gearBtn = iconBtn('gear', '설정');
     var closeBtn = iconBtn('x', '접기');
     hdr.appendChild(gearBtn);
@@ -967,12 +978,13 @@
     }
     var store = { get: function (k, d) { try { var v = localStorage.getItem('lckov.' + k); return v == null ? d : Number(v); } catch (e) { return d; } },
                   set: function (k, v) { try { localStorage.setItem('lckov.' + k, String(v)); } catch (e) {} } };
-    var delay = store.get('delay', -60);
+    var delay = store.get('delay', 30);
     var alpha = store.get('alpha', 94);
     /* UI 크기: 기본은 화면 폭에 맞춰 자동(1920px 기준 100%) — 슬라이더를 만지면 수동 고정 */
     function autoScalePct() {
       var w = window.innerWidth || 1920;
-      return Math.max(80, Math.min(180, Math.round(w / 1920 * 20) * 5));
+      /* 하한 95% — 24인치·노트북에서 글씨가 읽기 힘들 만큼 작아지던 문제 (제보 반영) */
+      return Math.max(95, Math.min(180, Math.round(w / 1920 * 20) * 5));
     }
     var scaleAuto = store.get('scaleAuto', store.get('scale', -1) < 0 ? 1 : 0);
     var uiScale = scaleAuto ? autoScalePct() : store.get('scale', 100);
@@ -1289,8 +1301,9 @@
         if (z.classList.contains('zleft')) { z.style.left = leftX + 'px'; z.style.right = 'auto'; }
         else { z.style.right = rightX + 'px'; z.style.left = 'auto'; }
       });
-      /* 팝업도 게임 화면 크기에 비례해 축소 (앵커 높이 1000px 기준 1.0, 최소 0.5) */
-      var k = Math.max(0.5, Math.min(1, b.height / 1000));
+      /* 팝업도 게임 화면 크기에 비례해 축소하되, 읽을 수 있는 하한을 둔다.
+         (기준 850px에서 1.0, 최소 0.85 — 24인치 창모드에서 0.6까지 줄어 글씨가 안 보이던 문제 수정) */
+      var k = Math.max(0.85, Math.min(1, b.height / 850));
       root.style.setProperty('--dnd-scale', Math.round(k * 100) / 100);
     }
     var zoneTimer = setInterval(function () {
@@ -1301,6 +1314,26 @@
     var dndOpenPid = null;
     var dndCmp = false;
     var dndSelZone = null;
+    /* 룬 팝업을 선택된 존 옆에 배치 (전체화면·작은 창에서 화면 밖으로 나가지 않게 보정) */
+    function placeDndPop() {
+      if (!dndSelZone) return;
+      var side = dndSelZone.classList.contains('zleft') ? 'blue' : 'red';
+      var rect = dndSelZone.getBoundingClientRect();
+      dndPop.style.top = Math.max(8, Math.min(rect.top, window.innerHeight - 260)) + 'px';
+      if (side === 'blue') {
+        dndPop.style.left = (rect.right + 12) + 'px';
+        dndPop.style.right = 'auto';
+      } else {
+        dndPop.style.right = (window.innerWidth - rect.left + 12) + 'px';
+        dndPop.style.left = 'auto';
+      }
+      dndPop.style.transformOrigin = side === 'blue' ? 'top left' : 'top right';
+      dndPop.style.display = 'block';
+      var pr = dndPop.getBoundingClientRect();
+      if (pr.bottom > window.innerHeight - 8) dndPop.style.top = Math.max(8, window.innerHeight - pr.height - 8) + 'px';
+      if (pr.right > window.innerWidth - 8) { dndPop.style.left = 'auto'; dndPop.style.right = '8px'; }
+      if (pr.left < 8) { dndPop.style.right = 'auto'; dndPop.style.left = '8px'; }
+    }
     function renderDndDetail() {
       var p = byId[dndOpenPid];
       var opp = laneOpp(p);
@@ -1329,22 +1362,7 @@
           dndOpenPid = p.participantId; dndCmp = false; dndSelZone = z;
           z.classList.add('sel');
           renderDndDetail();
-          var rect = z.getBoundingClientRect();
-          dndPop.style.top = Math.max(8, Math.min(rect.top, window.innerHeight - 260)) + 'px';
-          if (side === 'blue') {
-            dndPop.style.left = (rect.right + 12) + 'px';
-            dndPop.style.right = 'auto';
-          } else {
-            dndPop.style.right = (window.innerWidth - rect.left + 12) + 'px';
-            dndPop.style.left = 'auto';
-          }
-          dndPop.style.transformOrigin = side === 'blue' ? 'top left' : 'top right';
-          dndPop.style.display = 'block';
-          /* 화면 밖으로 나가지 않게 보정 (전체화면·작은 창) */
-          var pr = dndPop.getBoundingClientRect();
-          if (pr.bottom > window.innerHeight - 8) dndPop.style.top = Math.max(8, window.innerHeight - pr.height - 8) + 'px';
-          if (pr.right > window.innerWidth - 8) { dndPop.style.left = 'auto'; dndPop.style.right = '8px'; }
-          if (pr.left < 8) { dndPop.style.right = 'auto'; dndPop.style.left = '8px'; }
+          placeDndPop();
         });
         zoneList.push(z);
         dndzones.appendChild(z);
@@ -1495,9 +1513,16 @@
       }
     }
 
-    shadow.appendChild(root);
+    /* 새 화면 완성 → 이전 화면과 한 번에 교체 (중간에 빈 화면이 없어 번쩍이지 않는다) */
+    if (prevRoot) shadow.replaceChild(root, prevRoot);
+    else shadow.appendChild(root);
 
     /* ── 동작 ── */
+    resyncBtn.addEventListener('click', function () {
+      resyncBtn.classList.add('spin');
+      notify({ text: '최신 시점으로 다시 맞추는 중...' });
+      opts.onResync();
+    });
     gearBtn.addEventListener('click', function () { root.classList.toggle('settings'); });
     closeBtn.addEventListener('click', function () { root.classList.add('min'); });
     pill.addEventListener('click', function () { root.classList.remove('min'); });
@@ -1599,7 +1624,29 @@
       setTab: setTab,
       notify: notify,
       setPref: function (k, v) { PREFS[k] = v ? 1 : 0; savePrefs(); rerenderHooks.forEach(function (f) { f(); }); },
-      destroy: function () {
+      /* 열려 있는 상세 화면(선수·비교 모드) — 갱신 후 그대로 되살리기 위한 값 */
+      getView: function () {
+        return { openPid: openPid, openCmp: openCmp, dndOpenPid: dndOpenPid, dndCmp: dndCmp };
+      },
+      setView: function (v) {
+        if (!v) return;
+        if (v.openPid != null && byId[v.openPid]) {
+          openPid = v.openPid; openCmp = !!v.openCmp;
+          selRow = root.querySelector('.row[data-pid="' + v.openPid + '"]');
+          if (selRow) selRow.classList.add('sel');
+          renderPanelDetail();
+          dzone.classList.add('open');
+        }
+        if (v.dndOpenPid != null && byId[v.dndOpenPid]) {
+          dndOpenPid = v.dndOpenPid; dndCmp = !!v.dndCmp;
+          dndSelZone = root.querySelector('.dndzone[data-pid="' + v.dndOpenPid + '"]');
+          if (dndSelZone) dndSelZone.classList.add('sel');
+          renderDndDetail();
+          placeDndPop();
+        }
+      },
+      /* 타이머·리스너만 정리 (DOM은 다음 mount가 통째로 갈아끼운다) */
+      dispose: function () {
         if (timer) clearInterval(timer);
         document.removeEventListener('keydown', keyHandler, true); // 콘솔 버전은 폴링마다 재마운트 — 리스너 누적 방지
         if (zoneTimer) clearInterval(zoneTimer);
@@ -1607,6 +1654,9 @@
         document.removeEventListener('fullscreenchange', positionZones);
         window.removeEventListener('resize', onScaleResize);
         document.removeEventListener('fullscreenchange', onScaleResize);
+      },
+      destroy: function () {
+        this.dispose();
         shadow.textContent = '';
       }
     };
@@ -2835,7 +2885,7 @@
             try { await refreshRanges(); } catch (e) { log("일정 갱신 실패: " + e.message); }
           }
           var behind = videoBehindLive();
-          var delay = Number(localStorage.getItem("lckov.delay") || -60);
+          var delay = Number(localStorage.getItem("lckov.delay") || 30);
           var eff = new Date(nowMs - behind * 1000 + delay * 1000);
           var sel = pickGameAt(eff);
           if (!sel) { log("피드 대기 중 (밴픽이면 게임 시작 후 자동 감지)"); return; }
@@ -2882,7 +2932,7 @@
           }
         }
 
-        /* 방송 시계 OCR → 딜레이 오프셋 자동 보정 (기본 −60초는 보수적 초기값일 뿐) */
+        /* 방송 시계 OCR → 딜레이 오프셋 자동 보정 (기본 +30초는 "가장 최신"을 뜻하는 초기값일 뿐) */
         var ocrL = null, ocrLPrev = null, ocrLNoted = false;
         var vLive = findVideo();
         if (typeof LCKClockOCR !== "undefined" && vLive) {
@@ -2904,7 +2954,13 @@
             if (!trusted || ev.conf < 0.8) return;
             var behind = videoBehindLive();
             var newDelay = Math.round(((curStart.getTime() + ev.time * 1000) - (nowMs - behind * 1000)) / 1000);
-            var curDelay = Number(localStorage.getItem("lckov.delay") || -60);
+            /* 자리를 비운 사이 방송이 버퍼링되면 큰 음수(-200초 등)로 굳는 사례 제보 —
+               라이브에서 5분 이상 뒤처진 값은 오인식으로 보고 버린다 (헤더 새로고침으로 복구 가능) */
+            if (newDelay < -300 || newDelay > 60) {
+              log("시계 인식값이 비정상(" + newDelay + "초) — 무시");
+              return;
+            }
+            var curDelay = Number(localStorage.getItem("lckov.delay") || 30);
             if (Math.abs(newDelay - curDelay) >= 3) {
               try { localStorage.setItem("lckov.delay", String(newDelay)); } catch (e) {}
               log("방송 시계 인식 → 딜레이 자동 보정 (" + newDelay + "초) — 오버레이가 방송 화면 시점과 일치합니다");
@@ -3318,7 +3374,7 @@
     return;
   }
   window.__lckovConsole = true;
-  console.log("[LCK 오버레이] 번들 0805-17:34 로드"); // ↻ 적용 여부 확인용
+  console.log("[LCK 오버레이] 번들 0805-18:11 로드"); // ↻ 적용 여부 확인용
   /* 확장 content script에서만 true — 자동 실행이므로 무관한 방송에는 오버레이를 띄우지 않는다 */
   var AUTO = !!(typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.id);
   /* 방송 소스 모드(OBS 브라우저 소스·크로마키 캡처용 단독 페이지): SOOP 페이지가 아니어도
@@ -3363,20 +3419,37 @@
     } catch (e) { host.removeAttribute("popover"); host.style.cssText = ""; }
   }
   function placeHost() {
-    if (popoverOk) {
-      /* 풀스크린 진입 시 브라우저가 팝오버를 닫으므로 다시 열어 top layer 최상단으로 */
-      try { host.hidePopover(); } catch (e) {}
-      try { host.showPopover(); } catch (e) {}
-      return;
-    }
     var fs = document.fullscreenElement || document.webkitFullscreenElement || null;
     if (fs && fs.tagName === "VIDEO") fs = fs.parentElement; // video 자체에는 자식을 얹을 수 없음
     var target = fs || document.documentElement;
-    if (target && host.parentNode !== target) target.appendChild(host);
+    /* 전체화면 요소는 팝오버보다 위에 깔린다 — 그대로 두면 오버레이가 보여도 클릭을 플레이어가 가져간다.
+       그래서 전체화면 동안에는 호스트를 그 요소 안으로 옮기고, 빠져나오면 되돌린다. */
+    if (target && host.parentNode !== target) {
+      var wasOpen = false;
+      if (popoverOk) {
+        try { wasOpen = host.matches(":popover-open"); } catch (e) {}
+        try { host.hidePopover(); } catch (e) {} // 이동 전 닫아야 top layer 상태가 꼬이지 않는다
+      }
+      target.appendChild(host);
+      if (popoverOk) { try { host.showPopover(); } catch (e) { popoverOk = false; host.removeAttribute("popover"); } }
+      else if (wasOpen) { /* 팝오버 미지원: 이동만으로 충분 */ }
+    } else if (popoverOk) {
+      /* 위치는 그대로여도 전체화면 전환 시 브라우저가 팝오버를 닫으므로 다시 연다 */
+      try { host.hidePopover(); } catch (e) {}
+      try { host.showPopover(); } catch (e) {}
+    }
   }
   document.addEventListener("fullscreenchange", placeHost);
   document.addEventListener("webkitfullscreenchange", placeHost);
   placeHost();
+  /* 전체화면 동안 호스트가 플레이어 안에 들어가므로, SOOP이 플레이어 DOM을 갈아끼우면
+     오버레이째 사라질 수 있다 — 갱신 때마다 붙어 있는지 확인하고 떨어졌으면 복구 */
+  function ensureHost() {
+    if (host.isConnected) return;
+    document.documentElement.appendChild(host);
+    if (popoverOk) { try { host.showPopover(); } catch (e) {} }
+    placeHost();
+  }
 
   var api = null;
   var handle = null;
@@ -3391,12 +3464,11 @@
     var s = {
       min: r.classList.contains("min"), dnd: r.classList.contains("dnd"),
       settings: r.classList.contains("settings"), originLeft: r.classList.contains("origin-left"),
-      left: r.style.left, top: r.style.top, right: r.style.right, tab: 0, openPid: null
+      left: r.style.left, top: r.style.top, right: r.style.right, tab: 0,
+      view: api.getView ? api.getView() : null /* 열린 선수·비교 모드까지 보존 */
     };
     var vtabs = r.querySelectorAll(".vtab");
     for (var i = 0; i < vtabs.length; i++) if (vtabs[i].classList.contains("on")) s.tab = i;
-    var sel = r.querySelector(".row.sel");
-    if (sel) s.openPid = sel.dataset.pid;
     return s;
   }
   function restore(s) {
@@ -3408,10 +3480,7 @@
     if (s.originLeft) r.classList.add("origin-left");
     if (s.left) { r.style.left = s.left; r.style.top = s.top; r.style.right = s.right; }
     if (s.tab) api.setTab(TABS[s.tab]);
-    if (s.openPid) {
-      var row = r.querySelector('.row[data-pid="' + s.openPid + '"]');
-      if (row) row.click();
-    }
+    if (s.view && api.setView) api.setView(s.view);
   }
 
   /* 경기·세트 선택과 게임 시간 싱크를 오버레이 설정에 연결 */
@@ -3457,10 +3526,12 @@
   var hinted = false;
   function onState(state) {
     if (api && api.isCalibrating && api.isCalibrating()) return; // 영역 조절 중 재마운트 금지
+    ensureHost();
     var s = capture();
-    if (api) api.destroy();
+    /* DOM은 지우지 않는다 — 새 화면이 완성되면 mount가 한 프레임에 갈아끼운다 (번쩍임 방지) */
+    if (api) (api.dispose || api.destroy).call(api);
     /* tickClock: 폴링(10초) 사이에도 시계가 1초씩 흐르게 — 다음 폴링이 오차를 보정 */
-    api = LCKOverlay.mount(host, state, { source: makeSource(), tickClock: true });
+    api = LCKOverlay.mount(host, state, { source: makeSource(), tickClock: true, onResync: resync });
     restore(s);
     /* 송출 소스 모드 기본값: 방해금지(선수 클릭 → 룬 팝업)로 시작 — 큰 패널이 방송을 가리지 않게.
        ?dnd=0으로 끌 수 있고, 스트리머가 직접 토글하면 그 선택을 유지한다 */
@@ -3522,6 +3593,18 @@
     if (handle) handle.stop();
     handle = null;
     boot();
+  }
+  /* 헤더 새로고침: 딜레이를 기본(최신)으로 되돌리고 즉시 다시 붙는다.
+     자리를 비운 사이 방송이 버퍼링·타임시프트되면 시계 인식이 큰 음수로 굳는 경우가 있다 */
+  function resync() {
+    try {
+      localStorage.setItem("lckov.delay", "30");
+      /* 다시보기라면 저장된 영상 싱크도 버려 새로 잡는다 (틀어진 싱크가 계속 재사용되는 것 방지) */
+      var vm = location.pathname.match(/\/player\/(\d+)/);
+      if (vm) localStorage.removeItem("lckov.vodepoch." + vm[1]);
+    } catch (e) {}
+    console.log("[LCK 오버레이] 새로고침 — 딜레이 초기화 후 재동기");
+    restart();
   }
   /* 경기 선택 드롭다운: 다시보기 페이지에서는 시즌 전체, 그 외에는 라이브 + 최근 12일 */
   var IS_VOD_PAGE = /(^|\.)vod\./.test(location.hostname);
