@@ -2801,11 +2801,36 @@
   }
 
   /* 공통: 한 시점의 프레임을 받아 state로 변환해 전달 */
+  /* 라이엇 피드가 공급하는 최신 시점까지의 지연(초) — 엔드포인트별로 다르고 경기·시점에 따라 변한다.
+     너무 최신을 요청하면 400이므로, 실패 시 10초씩 물러나고 성공이 이어지면 다시 당겨 최소 지연을 유지한다.
+     (2026-08 실측: 요청 시각이 30초보다 최신이면 400. 허용되는 가장 최신 요청으로 받아도
+     실제 데이터는 window ≈ 25초, details ≈ 30초 전 — 이게 라이엇이 주는 물리적 하한이다) */
+  var feedLag = { window: 30, details: 30 };
+  var feedOk = { window: 0, details: 0 };
+  async function fetchNewest(kind, gameId, target, isLive) {
+    if (!isLive) return jOr(FEED + &quot;/&quot; + kind + &quot;/&quot; + gameId + &quot;?startingTime=&quot; + iso(floor10(target)));
+    for (var tries = 0; tries &lt; 4; tries++) {
+      var t = Math.min(target.getTime(), Date.now() - feedLag[kind] * 1000);
+      var r = await jOr(FEED + &quot;/&quot; + kind + &quot;/&quot; + gameId + &quot;?startingTime=&quot; + iso(floor10(new Date(t))));
+      if (r &amp;&amp; r.frames &amp;&amp; r.frames.length) {
+        /* 연속 성공이 쌓이면 10초 더 당겨본다 — 라이엇이 더 빨리 주는 시간대·경기에서 지연 최소화 */
+        if (++feedOk[kind] &gt;= 6 &amp;&amp; feedLag[kind] &gt; 30) { feedLag[kind] -= 10; feedOk[kind] = 0; }
+        return r;
+      }
+      feedOk[kind] = 0;
+      if (feedLag[kind] &gt;= 90) return null;
+      feedLag[kind] += 10;
+    }
+    return null;
+  }
+
   async function fetchAndEmit(gameId, gameNumber, gameStart, target, goldHistory, opts, isLive) {
-    var qs = &quot;?startingTime=&quot; + iso(floor10(target));
-    var win = await jOr(FEED + &quot;/window/&quot; + gameId + qs);
-    var det = await jOr(FEED + &quot;/details/&quot; + gameId + qs);
+    /* window(골드·KDA 등 실시간 수치)와 details(룬·아이템)는 공급 지연이 달라 각각 최신 시점을 쓴다 */
+    var win = await fetchNewest(&quot;window&quot;, gameId, target, isLive);
+    var det = await fetchNewest(&quot;details&quot;, gameId, target, isLive);
     if (!win || !det) { log(&quot;프레임 없음 (204) — 대기&quot;); return; }
+    /* 라이브에서는 실제로 받아온 프레임 시각이 표시 기준 (요청 목표보다 최신일 수 있음) */
+    if (isLive) target = new Date(win.frames[win.frames.length - 1].rfc460Timestamp);
     var dd = await loadStatic(win.gameMetadata.patchVersion);
     var f = win.frames[win.frames.length - 1];
     var elapsed = Math.max(0, Math.round((new Date(f.rfc460Timestamp) - gameStart) / 1000));
@@ -2930,10 +2955,8 @@
           if (sel.e.end &amp;&amp; target &gt; sel.e.end) target = sel.e.end;       // 종료된 세트면 마지막 장면 유지
           var minT = new Date(sel.e.start.getTime() + 15000);
           if (target &lt; minT) target = minT;                               // 피드 시작 직전 204 방지
-          /* 피드는 실제 경기보다 ~20-30초 늦게 공급 — 딜레이 0(송출 모드)이어도
-             아직 존재하지 않는 프레임을 요청하면 204만 반복되므로 최신 공급분까지로 클램프 */
-          var newest = new Date(Date.now() - 35000);
-          if (target &gt; newest &amp;&amp; newest &gt;= minT) target = newest;
+          /* 피드는 실제 경기보다 늦게 공급된다 — 얼마나 늦는지는 fetchNewest가 실측으로 학습하므로
+             여기서는 목표만 넘기고, 공급 한계로 당기는 일은 fetchNewest에 맡긴다 */
           var st = await fetchAndEmit(curId, curNum, curStart, target, histories[curId], opts, true);
           /* 라이엇 이벤트 상태 갱신이 늦어도(2026-08 실측) 피드의 finished 신호로 세트 종료를 직접 판정
              — 시계를 실제 종료 시각에 고정하고, 다음 세트가 시작되면 refreshRanges가 자동 전환 */
@@ -3388,7 +3411,7 @@
     return;
   }
   window.__lckovConsole = true;
-  console.log(&quot;[LCK 오버레이] 번들 0805-16:22 로드&quot;); // ↻ 적용 여부 확인용
+  console.log(&quot;[LCK 오버레이] 번들 0805-17:21 로드&quot;); // ↻ 적용 여부 확인용
   /* 확장 content script에서만 true — 자동 실행이므로 무관한 방송에는 오버레이를 띄우지 않는다 */
   var AUTO = !!(typeof chrome !== &quot;undefined&quot; &amp;&amp; chrome.runtime &amp;&amp; chrome.runtime.id);
   /* 방송 소스 모드(OBS 브라우저 소스·크로마키 캡처용 단독 페이지): SOOP 페이지가 아니어도
