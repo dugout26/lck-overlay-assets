@@ -2903,6 +2903,16 @@
             sel.e.end = st.frameTs ? new Date(st.frameTs) : new Date(target.getTime());
             log(curNum + &quot;세트 종료 — 다음 세트 시작 시 자동 전환&quot;);
           }
+          /* 현재 시각에 프레임이 없다(204) = 세트가 이미 끝났을 가능성 — 세트 종료 후에 접속한
+             경우 여기서 영영 대기하게 되므로, 마지막 프레임을 조회해 종료를 확정하고 최종 장면을 표시 */
+          if (!st &amp;&amp; !sel.e.end &amp;&amp; Date.now() - sel.e.start.getTime() &gt; 120000) {
+            var wEnd = await jOr(FEED + &quot;/window/&quot; + curId + &quot;?startingTime=&quot; + iso(floor10(endProbeTime(sel.e.start))));
+            var lf = wEnd &amp;&amp; wEnd.frames &amp;&amp; wEnd.frames.length ? wEnd.frames[wEnd.frames.length - 1] : null;
+            if (lf &amp;&amp; lf.gameState === &quot;finished&quot;) {
+              sel.e.end = new Date(lf.rfc460Timestamp);
+              log(curNum + &quot;세트는 이미 종료 — 최종 상황 표시, 다음 세트 시작 시 자동 전환&quot;);
+            }
+          }
         }
 
         /* 방송 시계 OCR → 딜레이 오프셋 자동 보정 (기본 −60초는 보수적 초기값일 뿐) */
@@ -3340,7 +3350,7 @@
     return;
   }
   window.__lckovConsole = true;
-  console.log(&quot;[LCK 오버레이] 번들 0805-15:21 로드&quot;); // ↻ 적용 여부 확인용
+  console.log(&quot;[LCK 오버레이] 번들 0805-15:27 로드&quot;); // ↻ 적용 여부 확인용
   /* 확장 content script에서만 true — 자동 실행이므로 무관한 방송에는 오버레이를 띄우지 않는다 */
   var AUTO = !!(typeof chrome !== &quot;undefined&quot; &amp;&amp; chrome.runtime &amp;&amp; chrome.runtime.id);
   /* 방송 소스 모드(OBS 브라우저 소스·크로마키 캡처용 단독 페이지): SOOP 페이지가 아니어도
